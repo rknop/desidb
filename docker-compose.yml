@@ -1,0 +1,29 @@
+version: "3.2"
+
+services:
+  desidb-django-postgres:
+    image: rknop/postgres-q3c
+    volumes:
+      - desidb-django-postgresdata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_NAME=desidb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRESPASSWORD}
+
+  desidb-django:
+    image: rknop/desidb-django
+    ports:
+      - "8080:8080"
+    environment:
+      - POSTGRES_NAME=desidb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRESPASSWORD}
+      - DESIPASSWORD=${DESIPASSWORD}
+    user: "${UID}:${GID}"
+    volumes:
+      - type: bind
+        source: ./django
+        target: /django
+
+volumes:
+  desidb-django-postgresdata:

@@ -1,0 +1,36 @@
+MANUAL SCHEMA CREATION
+
+I haven't figured out how to tell Django that these exist, so for now we
+have to do manual migrations to create new schema.  To do this, in /django/desidb:
+
+  python manage.py makemigrations everest --empty
+
+replacing everest with the appropriate django ap.  That will create a
+file in everest/migrations.  Edit that file to have:
+
+    operations = [
+       migrations.RunSQL(
+         sql = f"CREATE USER desi PASSWORD {os.getenv('DESIPASSWORD')} LOGIN",
+         reverse_sql = "DROP USER desi"
+       )
+       migrations.RunSQL( 
+         sql = 'CREATE SCHEMA IF NOT EXISTS everest',
+         reverse_sql = 'DROP SCHEMA IF EXISTS everest'
+       ),
+       migrations.RunSQL(
+         sql = 'GRANT USAGE ON SCHEMA everest TO desi',
+         reverse_sql = 'REVOKE USAGE ON SCHEMA everest FROM desi'
+       )
+       migrations.RunSQL(
+         sql = ( 'ALTER DEFAULT PRIVILEGES IN SCHEMA everest '
+                 'GRANT SELECT ON TABLES TO desi' )
+         reverse_sql = ( 'ALTER DEFAULT PRIVILEGES IN SCHEMA everest '
+                         'REVOKE SELECT ON TABLES FROM desi' )
+      )
+    ]
+
+or whatever SQL you really need.  (Remember to add 'import os' at the
+top.)  (For schema creation, only include the user creation in the *very*
+first one.  Change everest, of course, to whatever the schema is.)
+
+
