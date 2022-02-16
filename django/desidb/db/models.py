@@ -13,7 +13,7 @@ class LongNameBTreeIndex(indexes.BTreeIndex):
     def max_name_length(self):
         return 63 - len(models.Index.suffix) + len(self.suffix)
 
-    
+
 class Redrock(models.Model):
     """Encapsulates one redrock-{petal}-{tile}-thru{night}.fits file"""
     tileid = models.IntegerField( null=False )
@@ -25,8 +25,8 @@ class Redrock(models.Model):
         ordering = [ "tileid", "petal", "night" ]
         unique_together = [ [ 'tileid', 'petal', 'night' ] ]
         index_together = [ [ 'tileid', 'petal', 'night' ] ]
-        
-    
+
+
 class Redshifts(models.Model):
     """HDU 1, "Redshifts" """
     targetid = models.BigIntegerField( null=False )
@@ -45,8 +45,8 @@ class Redshifts(models.Model):
     zerr = models.FloatField( null=True )
     zwarn = models.BigIntegerField( null=True )
     npixels = models.BigIntegerField( null=True )
-    spectype = models.CharField( max_length=6 )
-    subtype = models.CharField( max_length=20 )
+    spectype = models.CharField( max_length=6, null=True )
+    subtype = models.CharField( max_length=20, null=True )
     ncoeff = models.BigIntegerField( null=True )
     deltachi2 = models.FloatField( null=True )
 
@@ -56,9 +56,10 @@ class Redshifts(models.Model):
     class Meta:
         abstract = True
         indexes = [
-            LongNameBTreeIndex( fields=['targetid'], name="idx_%(class)s_targetid" )
+            LongNameBTreeIndex( fields=['targetid'], name="idx_%(app_label)s_%(class)s_targetid" )
         ]
-    
+        unique_together = [ [ 'redrock_file', 'targetid' ] ]
+
 class Fibermap(models.Model):
     """HDU 2, "Fibermap" """
     targetid = models.BigIntegerField( null=False )
@@ -75,7 +76,7 @@ class Fibermap(models.Model):
     lambda_ref = models.FloatField( null=True )
     fa_target = models.BigIntegerField( null=True )
     fa_type = models.SmallIntegerField( null=True )
-    objtype = models.CharField( max_length=3 )
+    objtype = models.CharField( max_length=3, null=True )
     fiberassign_x = models.FloatField( null=True )
     fiberassign_y = models.FloatField( null=True )
     priority = models.IntegerField( null=True )
@@ -84,7 +85,7 @@ class Fibermap(models.Model):
     release = models.SmallIntegerField( null=True )
     brickid = models.IntegerField( null=True )
     brick_objid = models.IntegerField( null=True )
-    morphtype = models.CharField( max_length=4 )
+    morphtype = models.CharField( max_length=4, null=True )
     flux_g = models.FloatField( null=True )
     flux_r = models.FloatField( null=True )
     flux_z = models.FloatField( null=True )
@@ -93,12 +94,12 @@ class Fibermap(models.Model):
     flux_ivar_z = models.FloatField( null=True )
     maskbits = models.SmallIntegerField( null=True )
     ref_id = models.BigIntegerField( null=True )
-    ref_cat = models.CharField( max_length=2 )
+    ref_cat = models.CharField( max_length=2, null=True )
     gaia_phot_g_mean_mag = models.FloatField( null=True )
     gaia_phot_bp_mean_mag = models.FloatField( null=True )
     gaia_phot_rp_mean_mag = models.FloatField( null=True )
     parallax = models.FloatField( null=True )
-    brickname = models.CharField( max_length=8 )
+    brickname = models.CharField( max_length=8, null=True )
     ebv = models.FloatField( null=True )
     flux_w1 = models.FloatField( null=True )
     flux_w2 = models.FloatField( null=True )
@@ -114,7 +115,7 @@ class Fibermap(models.Model):
     shape_r = models.FloatField( null=True )
     shape_e1 = models.FloatField( null=True )
     shape_e2 = models.FloatField( null=True )
-    photsys = models.CharField( max_length=1 )
+    photsys = models.CharField( max_length=1, null=True )
     priority_init = models.BigIntegerField( null=True )
     numobs_init = models.BigIntegerField( null=True )
     sv3_desi_target = models.BigIntegerField( null=True )
@@ -149,23 +150,24 @@ class Fibermap(models.Model):
     class Meta:
         abstract = True
         indexes = [
-            LongNameBTreeIndex( fields=['targetid'], name="idx_%(class)s_targetid" ),
-            LongNameBTreeIndex( fields=['tileid'], name="idx_%(class)s_tileid" ),
-            LongNameBTreeIndex( fields=['petal_loc'], name="idx_%(class)s_petal_loc" ),
+            LongNameBTreeIndex( fields=['targetid'], name="idx_%(app_label)s_%(class)s_targetid" ),
+            LongNameBTreeIndex( fields=['tileid'], name="idx_%(app_label)s_%(class)s_tileid" ),
+            LongNameBTreeIndex( fields=['petal_loc'], name="idx_%(app_label)s_%(class)s_petal_loc" ),
             LongNameBTreeIndex( q3c_ang2ipix('target_ra', 'target_dec'),
-                          name='idx_%(class)s_q3c_target' ),
+                          name='idx_%(app_label)s_%(class)s_q3c_target' ),
             LongNameBTreeIndex( q3c_ang2ipix('mean_fiber_ra', 'mean_fiber_dec'),
-                          name='idx_%(class)s_q3c_meanfiber' )
+                          name='idx_%(app_label)s_%(class)s_q3c_meanfiber' )
         ]
-            
-            
+        unique_together = [ [ 'redrock_file', 'targetid' ] ]
+
+
 class ExpFibermap(models.Model):
     """HDU 3, "Exp_Fibermap" """
     targetid = models.BigIntegerField( null=False )
     priority = models.IntegerField( null=True )
     subpriority = models.FloatField( null=True )
     night = models.IntegerField( null=False )
-    expid = models.IntegerField( null=True )
+    expid = models.IntegerField( null=False )
     mjd = models.FloatField( null=True )
     tileid = models.IntegerField( null=False )
     exptime = models.FloatField( null=True )
@@ -194,55 +196,57 @@ class ExpFibermap(models.Model):
     class Meta:
         abstract = True
         indexes = [
-            LongNameBTreeIndex( fields=['targetid'], name="idx_%(class)s_targetid" ),
-            LongNameBTreeIndex( fields=['tileid'], name="idx_%(class)s_tileid" ),
-            LongNameBTreeIndex( fields=['petal_loc'], name="idx_%(class)s_petal_loc" ),
-            LongNameBTreeIndex( fields=['night'], name="idx_%(class)s_night" ),
-            LongNameBTreeIndex( q3c_ang2ipix('fiber_ra', 'fiber_dec'), name='idx_%(class)s_q3c_fiber' )
+            LongNameBTreeIndex( fields=['targetid'], name="idx_%(app_label)s_%(class)s_targetid" ),
+            LongNameBTreeIndex( fields=['tileid'], name="idx_%(app_label)s_%(class)s_tileid" ),
+            LongNameBTreeIndex( fields=['petal_loc'], name="idx_%(app_label)s_%(class)s_petal_loc" ),
+            LongNameBTreeIndex( fields=['night'], name="idx_%(app_label)s_%(class)s_night" ),
+            LongNameBTreeIndex( q3c_ang2ipix('fiber_ra', 'fiber_dec'), name='idx_%(app_label)s_%(class)s_q3c_fiber' )
         ]
+        unique_together = [ [ 'redrock_file', 'targetid', 'expid' ] ]
+
 
 class TSNR2(models.Model):
     """HDU_r, "TSNR2" """
     targetid = models.BigIntegerField( null=False )
-    gpbdark_b = models.FloatField( null=True )
-    elg_b = models.FloatField( null=True )
-    gpbbright_b = models.FloatField( null=True )
-    lya_b = models.FloatField( null=True )
-    bgs_b = models.FloatField( null=True )
-    gpbbackup_b = models.FloatField( null=True )
-    qso_b = models.FloatField( null=True )
-    lrg_b = models.FloatField( null=True )
-    gpbdark_r = models.FloatField( null=True )
-    elg_r = models.FloatField( null=True )
-    gpbbright_r = models.FloatField( null=True )
-    lya_r = models.FloatField( null=True )
-    bgs_r = models.FloatField( null=True )
-    gpbbackup_r = models.FloatField( null=True )
-    qso_r = models.FloatField( null=True )
-    lrg_r = models.FloatField( null=True )
-    gpbdark_z = models.FloatField( null=True )
-    elg_z = models.FloatField( null=True )
-    gpbbright_z = models.FloatField( null=True )
-    lya_z = models.FloatField( null=True )
-    bgs_z = models.FloatField( null=True )
-    gpbbackup_z = models.FloatField( null=True )
-    qso_z = models.FloatField( null=True )
-    lrg_z = models.FloatField( null=True )
-    gpbdark = models.FloatField( null=True )
-    elg = models.FloatField( null=True )
-    gpbbright = models.FloatField( null=True )
-    lya = models.FloatField( null=True )
-    bgs = models.FloatField( null=True )
-    gpbbackup = models.FloatField( null=True )
-    qso = models.FloatField( null=True )
-    lrg = models.FloatField( null=True )
-    
+    tsnr2_gpbdark_b = models.FloatField( null=True )
+    tsnr2_elg_b = models.FloatField( null=True )
+    tsnr2_gpbbright_b = models.FloatField( null=True )
+    tsnr2_lya_b = models.FloatField( null=True )
+    tsnr2_bgs_b = models.FloatField( null=True )
+    tsnr2_gpbbackup_b = models.FloatField( null=True )
+    tsnr2_qso_b = models.FloatField( null=True )
+    tsnr2_lrg_b = models.FloatField( null=True )
+    tsnr2_gpbdark_r = models.FloatField( null=True )
+    tsnr2_elg_r = models.FloatField( null=True )
+    tsnr2_gpbbright_r = models.FloatField( null=True )
+    tsnr2_lya_r = models.FloatField( null=True )
+    tsnr2_bgs_r = models.FloatField( null=True )
+    tsnr2_gpbbackup_r = models.FloatField( null=True )
+    tsnr2_qso_r = models.FloatField( null=True )
+    tsnr2_lrg_r = models.FloatField( null=True )
+    tsnr2_gpbdark_z = models.FloatField( null=True )
+    tsnr2_elg_z = models.FloatField( null=True )
+    tsnr2_gpbbright_z = models.FloatField( null=True )
+    tsnr2_lya_z = models.FloatField( null=True )
+    tsnr2_bgs_z = models.FloatField( null=True )
+    tsnr2_gpbbackup_z = models.FloatField( null=True )
+    tsnr2_qso_z = models.FloatField( null=True )
+    tsnr2_lrg_z = models.FloatField( null=True )
+    tsnr2_gpbdark = models.FloatField( null=True )
+    tsnr2_elg = models.FloatField( null=True )
+    tsnr2_gpbbright = models.FloatField( null=True )
+    tsnr2_lya = models.FloatField( null=True )
+    tsnr2_bgs = models.FloatField( null=True )
+    tsnr2_gpbbackup = models.FloatField( null=True )
+    tsnr2_qso = models.FloatField( null=True )
+    tsnr2_lrg = models.FloatField( null=True )
+
     # These don't seem to work in abstract classes, so we have to copy to each derived class
     # redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
 
     class Meta:
         abstract = True
         indexes = [  
-          LongNameBTreeIndex( fields=['targetid'], name="idx_%(class)s_targetid" ),
+          LongNameBTreeIndex( fields=['targetid'], name="idx_%(app_label)s_%(class)s_targetid" ),
         ]
-    
+        unique_together = [ [ 'redrock_file', 'targetid' ] ]

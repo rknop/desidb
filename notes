@@ -10,8 +10,16 @@ file in everest/migrations.  Edit that file to have:
 
     operations = [
        migrations.RunSQL(
-         sql = f"CREATE USER desi PASSWORD {os.getenv('DESIPASSWORD')} LOGIN",
-         reverse_sql = "DROP USER desi"
+         sql = ( f"DO $do$ "
+                 f"BEGIN "
+                 f"  IF NOT EXISTS ( "
+                 f"     SELECT FROM pg_catalog.pg_roles WHERE rolname='desi' "
+                 f"  ) THEN "
+                 f"     CREATE ROLE desi PASSWORD '{os.getenv('DESIPASSWORD')}' LOGIN; "
+                 f"  END IF; "
+                 f"END "
+                 f"$do$;" ),
+         reverse_sql = ""
        )
        migrations.RunSQL( 
          sql = 'CREATE SCHEMA IF NOT EXISTS everest',
