@@ -76,12 +76,15 @@ WSGI_APPLICATION = 'desidb.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/2.2/ref/settings/#databases
 
+with open( os.getenv("POSTGRES_PASSWORD_FILE" ) as ifp:
+    passwd = ifp.readline().strip()
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv( 'POSTGRES_NAME' ),
         'USER': os.getenv( 'POSTGRES_USER' ),
-        'PASSWORD': os.getenv( 'POSTGRES_PASSWORD' ),
+        'PASSWORD': passwd,
         'HOST': 'desidb-django-postgres',
         'PORT': '5432',
     }

@@ -8,9 +8,13 @@ services:
     image: rknop/postgres-q3c
     volumes:
       - desidb-django-postgresdata:/var/lib/postgresql/data
+      - type: bind
+        source: /home/raknop/secrets
+        target: /secrets
     environment:
       - POSTGRES_NAME=desidb
       - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD_FILE=""
       - POSTGRES_PASSWORD=${POSTGRESPASSWORD}
 
   desidb-django:
@@ -20,7 +24,7 @@ services:
     environment:
       - POSTGRES_NAME=desidb
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRESPASSWORD}
+      - POSTGRES_PASSWORD_FILE=/secrets/desidb_admin_postgres_password
       - DESIPASSWORD=${DESIPASSWORD}
     user: "${UID}:${GID}"
     volumes:
@@ -30,6 +34,9 @@ services:
       - type: bind
         source: /data/raknop/desi
         target: /data
+      - type: bind
+        source: /home/raknop/secrets
+        target: /secrets
 
 volumes:
   desidb-django-postgresdata:
