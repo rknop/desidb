@@ -1,5 +1,8 @@
 version: "3.2"
 
+# This file is really set up for Rob on his desktop....
+# (Moslty that shows up in the source of the /data bind mount.)
+
 services:
   desidb-django-postgres:
     image: rknop/postgres-q3c
@@ -24,6 +27,9 @@ services:
       - type: bind
         source: ./django
         target: /django
+      - type: bind
+        source: /data/raknop/desi
+        target: /data
 
 volumes:
   desidb-django-postgresdata:

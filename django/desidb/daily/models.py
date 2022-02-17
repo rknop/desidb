@@ -3,38 +3,38 @@ from django.db import models
 import db.models
 
 
-class RedrockCumulative(db.models.Redrock):
+class Redrock(db.models.Redrock):
 
     class Meta(db.models.Redrock.Meta):
-        db_table = 'daily"."redrock_cumulative'
+        db_table = 'daily"."redrock'
 
 
-class CumulativeRedshifts(db.models.Redshifts):
+class Redshifts(db.models.Redshifts):
 
-    redrock_file = models.ForeignKey( RedrockCumulative, on_delete=models.CASCADE )
+    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
 
     class Meta(db.models.Redshifts.Meta):
-        db_table = 'daily"."cumulative_redshifts'
+        db_table = 'daily"."redshifts'
 
 
-class CumulativeFibermap(db.models.Fibermap):
+class Fibermap(db.models.Fibermap):
 
-    redrock_file = models.ForeignKey( RedrockCumulative, on_delete=models.CASCADE )
+    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
 
     class Meta(db.models.Fibermap.Meta):
-        db_table = 'daily"."cumulative_fibermap'
+        db_table = 'daily"."fibermap'
 
-class CumulativeExpFibermap(db.models.ExpFibermap):
+class ExpFibermap(db.models.ExpFibermap):
 
-    redrock_file = models.ForeignKey( RedrockCumulative, on_delete=models.CASCADE )
+    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
 
     class Meta(db.models.ExpFibermap.Meta):
-        db_table = 'daily"."cumulative_expfibermap'
+        db_table = 'daily"."expfibermap'
 
 
-class CumulativeTSNR2(db.models.TSNR2):
+class TSNR2(db.models.TSNR2):
 
-    redrock_file = models.ForeignKey( RedrockCumulative, on_delete=models.CASCADE )
+    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
 
     class Meta(db.models.TSNR2.Meta):
-        db_table = 'daily"."cumulative_tsnr2'
+        db_table = 'daily"."tsnr2'
