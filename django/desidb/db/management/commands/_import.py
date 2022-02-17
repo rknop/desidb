@@ -51,8 +51,7 @@ def _astropy_table_to_pandas( tab ):
 def _fits_bintables_to_pandas( fitsfile ):
     """Pass it the path to a fits file.
 
-    Reads the FITS file.  Returns two things: (1) the FITS header object
-    from the very first HDU, (2) a dictionary of Extname: DataFrame for
+    Reads the FITS file.  Returns a dictionary of Extname: DataFrame for
     all bintables in the file.  For cases where the bintable had an
     array element, replace it with a bunch of individual elements that
     have _0, _1, etc. appended to the column names.
@@ -60,7 +59,6 @@ def _fits_bintables_to_pandas( fitsfile ):
     """
 
     with fits.open( fitsfile, memmap=False ) as hdulist:
-        header = hdulist[0].header
         bintables = {}
         for hdu in hdulist:
             if isinstance( hdu, fits.hdu.BinTableHDU ):
@@ -70,4 +68,4 @@ def _fits_bintables_to_pandas( fitsfile ):
                 df = _astropy_table_to_pandas( astropy.table.Table( hdu.data ) )
                 bintables[ hdu.name ] = df
 
-    return header, bintables
+    return bintables

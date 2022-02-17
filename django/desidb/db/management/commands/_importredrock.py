@@ -1,3 +1,4 @@
+import sys
 import re
 import pathlib
 import copy
@@ -5,7 +6,9 @@ import numpy
 import pandas
 from django.core.exceptions import FieldDoesNotExist
 import django.db
+from django.db import IntegrityError
 from psycopg2.errors import UniqueViolation
+from astropy.io import fits
 
 from db.management.commands._import import _fits_bintables_to_pandas, EntryExistsError, SchemaMismatchError
 
@@ -23,7 +26,7 @@ class RRVersion:
         self.stepping = int(match.group(3))
         self.tag = match.group(5)
 
-    def get_hdu_map( self ):
+    def get_tiles_hdu_map( self ):
         """A mapping of stuff in the FITS files to the database model.
 
         It's a dictionary.  Each key is one of the database models:
@@ -46,13 +49,14 @@ class RRVersion:
             raise ValueError( f"Don't know how to deal with redrock version {self.major}.{self.minor}" )
         if ( self.major == 0 ) and ( self.minor == 14 ):
             return {
-                'Redshifts': {
+                'TilesRedshifts': {
                     'hdu' : 'ZBEST',
                     'duplicates': 'error',
+                    'ignore': { 'numexp', 'numtile' },
                     'expect' : None,
                     'map': {}
                 },
-                'Fibermap': {
+                'TilesFibermap': {
                     'hdu' : 'FIBERMAP',
                     'duplicates': 'skip',
                     'ignore' : { 'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
@@ -65,21 +69,24 @@ class RRVersion:
                             'matchcolumn' : ['targetid'],
                             'otherhdumatchcolumn' : ['targetid'],
                             'otherhdu' : 'ZBEST',
-                            'column': 'numexp'
+                            'column': 'numexp',
+                            'typeconv': numpy.int16
                             },
                         'coadd_numtile': {
-                            'matchcolumn' : '[targetid'],
+                            'matchcolumn' : ['targetid'],
                             'otherhdumatchcolumn' : ['targetid'],
                             'otherhdu' : 'ZBEST',
-                            'column' : 'numtile'
+                            'column' : 'numtile',
+                            'typeconv': numpy.int16
                         }
                     }
                 },
-                'ExpFibermap': {
+                'TilesExpFibermap': {
                     'hdu' : 'FIBERMAP',
-                    'duplicates': 'error'
+                    'duplicates': 'skip',
                     'ignore' : None,
-                    'expect' :  { 'targetid', 'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
+                    'expect' :  { 'targetid', 'tileid', 'petal_loc', 'fiber',
+                                  'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
                                   'night', 'exptime', 'num_iter', 'psf_to_fiber_specflux', 'expid',
                                   'fiberstatus', 'mjd' },
                     'map' : {}
@@ -88,31 +95,34 @@ class RRVersion:
         else:
             # Default: expect full schema match
             hdumap = {
-                'Redshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
-                'Fibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
-                'ExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
-                'TSNR2': { 'hdu': 'TSNR2', 'duplicates': 'updateonce' }
+                'TilesRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
+                'TilesFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
+                'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
+                'TilesTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
             }
             for key, val in hdumap.items():
-                val['duplicates'] = 'error'
                 val['ignore'] = set()
                 val['expect'] = None
                 val['map'] = {}
             return hdumap
-                    
+
+
+    def get_healpix_hdu_map( self ):
+        hdumap = {
+            'HealpixRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
+            'HealpixFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
+            'HealpixExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
+            'HealpixTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
+        }
+        for key, val in hdumap.items():
+            val['ignore'] = set()
+            val['expect'] = None
+            val['map'] = {}
+        return hdumap
 
 # ======================================================================
 
-def _import_fits( filepath, tileid, petal, night, models, donotload=False, ignoreuniqueexception=False ):
-    """Returns a dictionary that's the same thing passed to SchemaMismatchError.
-    """
-
-    baseclass = getattr( models, 'Redrock' )
-    if not donlotload:
-        current = baseclass.objects.filter( tileid=tileid ).filter( petal=petal ).filter( night=night )
-        if len(current) > 0:
-            raise EntryExistsError( f'Entry already exists: tile={tileid}, petal={petal}, night={night}' )
-
+def _read_and_verify_fits( filepath, models, hdumap ):
     # I feel a bit queasy about this
     typematch = {
         'uint8' : django.db.models.SmallIntegerField,
@@ -125,9 +135,7 @@ def _import_fits( filepath, tileid, petal, night, models, donotload=False, ignor
     }
     django_system_fields = [ 'id' ]
 
-    primary_header, bintables = _fits_bintables_to_pandas( filepath )
-    rrver = RRVersion( primary_header['RRVER'] )
-    hdumap = rrver.get_hdu_map()
+    bintables = _fits_bintables_to_pandas( filepath )
     parseinfo = {
         'filepath': str(filepath),
         'missingdatablock': set(),
@@ -156,8 +164,8 @@ def _import_fits( filepath, tileid, petal, night, models, donotload=False, ignor
     # two columns have the same name.  I *think* Pandas represents this as an embedded
     # DataFrame, and will cause code crashes.
     for modeltable in hdumap.keys():
-        hdu = hduman[modeltable]['hdu']
-        for mapping in hdumap[modeltable]['map']:
+        hdu = hdumap[modeltable]['hdu']
+        for col, mapping in hdumap[modeltable]['map'].items():
             if mapping['otherhdu'] not in bintables.keys():
                 parseinfo['missingdatablock'].add( mapping['otherhdu'] )
                 schemaok = False
@@ -165,17 +173,19 @@ def _import_fits( filepath, tileid, petal, night, models, donotload=False, ignor
             maindf = bintables[hdu]
             otherdf = bintables[mapping['otherhdu']]
             maindf.set_index( mapping['matchcolumn'], inplace=True )
-            otherdf.set_index( mapping['otherhdumatchcolumn'], inplace=True )
-            maindf = pandas.concat( maindf, otherdf[ mapping['column'] ], axis=1 )
+            othercol = otherdf.set_index( mapping['otherhdumatchcolumn'] )[ mapping['column'] ]
+            othercol.name = col
+            if mapping['typeconv'] is not None:
+                othercol = othercol.astype( mapping['typeconv'] )
+            maindf = pandas.concat( [ maindf, othercol ], axis=1 )
             maindf.reset_index(inplace=True)
-            otherdif.reset_index(inplace=True)
             bintables[hdu] = maindf
             
     # Verify that either all expected columns are there or no ignored columns are there,
     #   and that dataytypes between FITS and Django match
     for modeltable in hdumap.keys():
         model = getattr( models, modeltable )
-        if hdumap[modeltable]['hdu'] not in hdus.keys():
+        if hdumap[modeltable]['hdu'] not in bintables.keys():
             # This will have been flagged as an error in parseinfo above, so just skip and punt
             continue
         df = bintables[ hdumap[modeltable]['hdu'] ]
@@ -231,50 +241,65 @@ def _import_fits( filepath, tileid, petal, night, models, donotload=False, ignor
                 if not field.null:
                     schemaok = False
                         
-        # Raise an exception if there was a fatal parseinfo
-        if not schemaok:
-            raise SchemaMismatchError( parseinfo )
+    # Raise an exception if there was a fatal parseinfo
+    if not schemaok:
+        raise SchemaMismatchError( parseinfo )
 
-        # If we get this far, then we believe that the FITS file and the database model match.
-        # (At least, we really hope.)
-        # Start loading, and weep if it crashes partway through.
+    return hdumap, bintables, parseinfo
 
-        if not donotload:
-            # I'm assuming that no other process is loading at the same time.  We checked way up
-            # at the top that this entry didn't already exist.  If multiple processes are doing
-            # this at once, I'm writing in a race condition here....
-            redrock = baseclass( tileid=tileid, petal=petal, night=night )
-            redrock.save()
-            
-            for modeltable in hdumap.keys():
-                model = getattr( models, modeltable )
-                df = bintables[ hdumap[modeltable]['hdu'] ]
+# ======================================================================
 
-                kwargs = { 'redrock_file': redrock }
-                for i, row in df.iterrows():
-                    for col in row.keys():
-                        if ( ( hdumap[modeltable]['ignore'] is not None )
-                             and ( col in hdumap[modeltable]['ignore'] ) ):
-                            continue
-                        if ( ( hdumap[modeltable]['expect'] is not None )
-                             and ( col not in hdumap[modeltable]['expect'] ) ):
-                            continue
-                        kwargs[col] = row[col]
-                    try:
-                        newobject = model( **kwargs )
-                        newobject.save()
-                    except UniqueViolation as e:
-                        if hdumap[modeltable]['duplicates'] == 'error':
-                            raise e
-                        elif hdumap[modeltable]['duplicates'] == 'skip':
-                            continue
-                        else:
-                            raise Exception( f"hdumap['{modeltable}']['duplicates'] has unknown value!" )
-                    except Exception as e:
-                        import pdb; pdb.set_trace()
-
-    # Done.  Return any mismatches form the parsing.
-    return parseinfo
+def _actually_load( df, hdumap, modeltable, kwargs, model ):
+    # ANNOYING PANDAS NOTE
+    # If you do for i, row in df.iterrows(), then everything in row
+    #   gets converted to a float... which is a disaster, especially
+    #   for bigints.  If you want to do iteration like this, you have
+    #   to be more careful.
+    # I know that the pandas dogma is that you should never
+    #   iterate through rows, but I'm not feeling clever enough
+    #   to properly integrate pandas and django here.  Somewhere
+    #   inside there is going to be iteration anyway, so it
+    #   seems foolish to make it more complicated when basic
+    #   iteration just makes sense.  Perhaps a pandas DataFrame
+    #   isn't the right data structure, but it was very
+    #   convenient for merging above.
+    for i in range( len(df) ):
+        for col in df.columns:
+            if ( ( hdumap[modeltable]['ignore'] is not None )
+                 and ( col in hdumap[modeltable]['ignore'] ) ):
+                continue
+            if ( ( hdumap[modeltable]['expect'] is not None )
+                 and ( col not in hdumap[modeltable]['expect'] ) ):
+                continue
+            kwargs[col] = df[col].values[i]
+        try:
+            newobject = model( **kwargs )
+            newobject.save()
+        except UniqueViolation as e:
+            # I'm not sure whether this (a pyscopg2 error) or
+            # IntegrityError (a django error) is what will pop
+            # up
+            if hdumap[modeltable]['duplicates'] == 'error':
+                raise e
+            elif hdumap[modeltable]['duplicates'] == 'skip':
+                continue
+            else:
+                raise Exception( f"hdumap['{modeltable}']['duplicates'] has unknown value!" )
+        except IntegrityError as e:
+            if 'violates unique constraint' in str(e):
+                if hdumap[modeltable]['duplicates'] == 'error':
+                    import pdb; pdb.set_trace()
+                    raise e
+                elif hdumap[modeltable]['duplicates'] == 'skip':
+                    continue
+                else:
+                    raise Exception( f"hdumap['{modeltable}']['duplicates'] has unknown value!" )
+            else:
+                raise e
+        except Exception as e:
+            sys.stderr.write( "OMG\n" )
+            import pdb; pdb.set_trace()
+            sys.stderr.write( "...\n" )
 
 # ======================================================================
 
@@ -298,9 +323,9 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
     basedir = pathlib.Path( basedir )
     direc = basedir / str(tileid) / str(night)
     if not direc.is_dir():
-        raise FileNotFoundError( f"{direc.name} isn't a directory" )
-    zbest = direc / f'zbest-{petal}-{tileid}-{"thru" if cumulative else ""}{night}.fits'
-    redrock = direc / f'zbest-{petal}-{tileid}-{"thru" if cumulative else ""}{night}.fits'
+        raise FileNotFoundError( f"{str(direc)} isn't an existing directory" )
+    zbest = direc / f'zbest-{petal}-{tileid}-thru{night}.fits'
+    redrock = direc / f'redrock-{petal}-{tileid}-thru{night}.fits'
     filetoread = None
     if redrock.is_file():
         filetoread = redrock
@@ -308,6 +333,69 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
         filetoread = zbest
     else:
         raise FileNotFoundError( f"Did not find {redrock} or {zbest}" )
-    return _import_fits( filetoread, tileid, petal, night, models, donotload=donotload )
+
+    with fits.open( filetoread, memmap=False ) as hdul:
+        rrver = RRVersion( hdul[0].header['RRVER'] )
+    hdumap = rrver.get_tiles_hdu_map()
     
-                 
+    baseclass = getattr( models, 'CumulativeTiles' )
+    if not donotload:
+        current = baseclass.objects.filter( tileid=tileid ).filter( petal=petal ).filter( night=night )
+        if len(current) > 0:
+            raise EntryExistsError( f'Entry already exists: tile={tileid}, petal={petal}, night={night}' )
+
+    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap ) 
+        
+    if not donotload:
+        # I'm assuming that no other process is loading at the same time.  We checked way up
+        # at the top that this entry didn't already exist.  If multiple processes are doing
+        # this at once, I'm writing in a race condition here....
+        cumultile = baseclass( tileid=tileid, petal=petal, night=night )
+        cumultile.save()
+
+        for modeltable in hdumap.keys():
+            model = getattr( models, modeltable )
+            df = bintables[ hdumap[modeltable]['hdu'] ]
+
+            kwargs = { 'cumultile': cumultile }
+            _actually_load( df, hdumap, modeltable, kwargs, model )
+
+    # Done.  Return any mismatches form the parsing.
+    return parseinfo
+
+# ======================================================================
+
+def import_healpix( basedir, survey, program, healpix, models, donotload=False ):
+    basedir = pathlib.Path( basedir )
+    direc = basedir / survey / program / str(healpix // 100) / str(healpix)
+    if not direc.is_dir():
+        raise FileNotFoundError( f"{str(direc)} isn't an existing directory" )
+    filetoread = direc / f'redrock-{survey}-{program}-{healpix}.fits'
+    if not filetoread.is_file():
+        raise FileNotFoundError( f"{str(filetoread)} isn't an existing regular file" )
+
+    with fits.open( filetoread, memmap=False ) as hdul:
+        rrver = RRVersion( hdul[0].header['RRVER'] )
+    hdumap = rrver.get_healpix_hdu_map()
+
+    baseclass = getattr( models, 'Healpix' )
+    if not donotload:
+        current = baseclass.objects.filter( healpix=healpix ).filter( survey=survey ).filter( program=program )
+        if len(current) > 0:
+            raise EntryExistsError( f'Entry already exists: healpix={healpix}, survey={survey}, program={program}' )
+
+    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap )
+
+    if not donotload:
+        healpixobj = baseclass( healpix=healpix, survey=survey, program=program )
+        healpixobj.save()
+
+        for modeltable in hdumap.keys():
+            model = getattr( models, modeltable )
+            df = bintables[ hdumap[modeltable]['hdu'] ]
+
+            kwargs = { 'healpix': healpixobj }
+            _actually_load( df, hdumap, modeltable, kwargs, model )
+            
+    # Done.  Return any mismatches form the parsing.
+    return parseinfo

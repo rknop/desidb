@@ -3,38 +3,39 @@ from django.db import models
 import db.models
 
 
-class Redrock(db.models.Redrock):
+class CumulativeTiles(db.models.CumulativeTiles):
 
-    class Meta(db.models.Redrock.Meta):
-        db_table = 'daily"."redrock'
-
-
-class Redshifts(db.models.Redshifts):
-
-    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
-
-    class Meta(db.models.Redshifts.Meta):
-        db_table = 'daily"."redshifts'
+    class Meta(db.models.CumulativeTiles.Meta):
+        db_table = 'daily"."cumulative_tiles'
 
 
-class Fibermap(db.models.Fibermap):
+class TilesRedshifts(db.models.CumulativeTilesRedshifts):
 
-    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
+    cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
 
-    class Meta(db.models.Fibermap.Meta):
-        db_table = 'daily"."fibermap'
-
-class ExpFibermap(db.models.ExpFibermap):
-
-    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
-
-    class Meta(db.models.ExpFibermap.Meta):
-        db_table = 'daily"."expfibermap'
+    class Meta(db.models.CumulativeTilesRedshifts.Meta):
+        db_table = 'daily"."tiles_redshifts'
 
 
-class TSNR2(db.models.TSNR2):
+class TilesFibermap(db.models.CumulativeTilesFibermap):
 
-    redrock_file = models.ForeignKey( Redrock, on_delete=models.CASCADE )
+    cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
 
-    class Meta(db.models.TSNR2.Meta):
-        db_table = 'daily"."tsnr2'
+    class Meta(db.models.CumulativeTilesFibermap.Meta):
+        db_table = 'daily"."tiles_fibermap'
+
+class TilesExpFibermap(db.models.CumulativeTilesExpFibermap):
+
+   cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
+
+   class Meta(db.models.CumulativeTilesExpFibermap.Meta):
+        db_table = 'daily"."tiles_expfibermap'
+
+
+class TilesTSNR2(db.models.CumulativeTilesTSNR2):
+
+    cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
+
+    class Meta(db.models.CumulativeTilesTSNR2.Meta):
+        db_table = 'daily"."tiles_tsnr2'
+
