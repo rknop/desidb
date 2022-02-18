@@ -8,7 +8,12 @@ from django.core.exceptions import FieldDoesNotExist
 import django.db
 from django.db import IntegrityError
 from psycopg2.errors import UniqueViolation
+# And, yes, we include a DIFFERENT orm to try to pair with the orm we're using!  Sigh.
+import sqlalchemy
+import sqlalchemy.exc
 from astropy.io import fits
+
+import desidb.settings
 
 from db.management.commands._import import _fits_bintables_to_pandas, EntryExistsError, SchemaMismatchError
 
@@ -33,6 +38,7 @@ class RRVersion:
         Redshifts, Fibermap, ExpFibermap, or TSNR2.  The Values are:
             hdu : name of the HDU that has the information for this table
             duplicates : 'error', 'skip', 'verify', 'update', 'updateonce'
+            skipcheck : see _actually_load for documentation
             ignore : set of columns that should be ignored (expect all others; 'expect' should be None)
             expect : set of columns that we should expect (ignore all others; 'ignore' should be None)
             map : dictionary.  Keys are Django columns, values are dictionary:
@@ -44,16 +50,26 @@ class RRVersion:
         All FITS column names have been converted to lower case.
 
         """
-
+        
         # SAD NOTE
         # There are files with the same RRVER header file that have different schema :(
         
         # Default: expect full schema match
         hdumap = {
-            'TilesRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
-            'TilesFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
-            'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
-            'TilesTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
+            'TilesRedshifts': { 'hdu': 'REDSHIFTS',
+                                'skipcheck': None,
+                                'duplicates': 'error'
+            },
+            'TilesFibermap': { 'hdu': 'FIBERMAP',
+                               'skipcheck': None,
+                               'duplicates': 'error'
+            },
+            'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP',
+                                  'skipcheck': [ 'tileid',  'petal_loc', 'night', 'expid' ],
+                                  'duplicates': 'skip' },
+            'TilesTSNR2': { 'hdu': 'TSNR2',
+                            'skipcheck': None,
+                            'duplicates': 'error' }
         }
         for key, val in hdumap.items():
             val['ignore'] = set()
@@ -66,6 +82,7 @@ class RRVersion:
             return {
                 'TilesRedshifts': {
                     'hdu' : 'ZBEST',
+                    'skipcheck': None,
                     'duplicates': 'error',
                     'ignore': { 'numexp', 'numtile' },
                     'expect' : None,
@@ -73,6 +90,7 @@ class RRVersion:
                 },
                 'TilesFibermap': {
                     'hdu' : 'FIBERMAP',
+                    'skipcheck': None,
                     'duplicates': 'skip',
                     'ignore' : { 'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
                                  'night', 'exptime', 'num_iter', 'psf_to_fiber_specflux', 'expid',
@@ -97,6 +115,7 @@ class RRVersion:
                 },
                 'TilesExpFibermap': {
                     'hdu' : 'FIBERMAP',
+                    'skipcheck': [ 'tileid', 'night', 'expid' ],
                     'duplicates': 'skip',
                     'ignore' : None,
                     'expect' :  { 'targetid', 'tileid', 'petal_loc', 'fiber',
@@ -112,10 +131,18 @@ class RRVersion:
 
     def get_healpix_hdu_map( self ):
         hdumap = {
-            'HealpixRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
-            'HealpixFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
-            'HealpixExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
-            'HealpixTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
+            'HealpixRedshifts': { 'hdu': 'REDSHIFTS',
+                                  'skipcheck': None,
+                                  'duplicates': 'error' },
+            'HealpixFibermap': { 'hdu': 'FIBERMAP',
+                                 'skipcheck': None,
+                                 'duplicates': 'error' },
+            'HealpixExpFibermap': { 'hdu': 'EXP_FIBERMAP',
+                                    'skipcheck': None,
+                                    'duplicates': 'skip' },
+            'HealpixTSNR2': { 'hdu': 'TSNR2',
+                              'skipcheck': None,
+                              'duplicates': 'error' }
         }
         for key, val in hdumap.items():
             val['ignore'] = set()
@@ -257,57 +284,96 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
 
 # ======================================================================
 
-def _actually_load( df, hdumap, modeltable, kwargs, model ):
-    # ANNOYING PANDAS NOTE
-    # If you do for i, row in df.iterrows(), then everything in row
-    #   gets converted to a float... which is a disaster, especially
-    #   for bigints.  If you want to do iteration like this, you have
-    #   to be more careful.
-    # I know that the pandas dogma is that you should never
-    #   iterate through rows, but I'm not feeling clever enough
-    #   to properly integrate pandas and django here.  Somewhere
-    #   inside there is going to be iteration anyway, so it
-    #   seems foolish to make it more complicated when basic
-    #   iteration just makes sense.  Perhaps a pandas DataFrame
-    #   isn't the right data structure, but it was very
-    #   convenient for merging above.
-    for i in range( len(df) ):
-        for col in df.columns:
-            if ( ( hdumap[modeltable]['ignore'] is not None )
-                 and ( col in hdumap[modeltable]['ignore'] ) ):
-                continue
-            if ( ( hdumap[modeltable]['expect'] is not None )
-                 and ( col not in hdumap[modeltable]['expect'] ) ):
-                continue
-            kwargs[col] = df[col].values[i]
-        try:
-            newobject = model( **kwargs )
-            newobject.save()
-        except UniqueViolation as e:
-            # I'm not sure whether this (a pyscopg2 error) or
-            # IntegrityError (a django error) is what will pop
-            # up
-            if hdumap[modeltable]['duplicates'] == 'error':
-                raise e
-            elif hdumap[modeltable]['duplicates'] == 'skip':
-                continue
-            else:
-                raise Exception( f"hdumap['{modeltable}']['duplicates'] has unknown value!" )
-        except IntegrityError as e:
-            if 'violates unique constraint' in str(e):
-                if hdumap[modeltable]['duplicates'] == 'error':
-                    import pdb; pdb.set_trace()
-                    raise e
-                elif hdumap[modeltable]['duplicates'] == 'skip':
+def _actually_actually_load( df, model ):
+    # And now we load it.  OMG.  Frankenstein's monster was not fiction.
+    # Stitching together Pandas, Django, and Postgresql here is a case
+    # study in trying to use libraries but then layering on other
+    # gigantically heavy libraries because the two libraries you really
+    # want don't play nicely together.  This, folks, is modern
+    # programming, and it's only going to get worse.  The Unix epoch
+    # being underneath all of the computer code millenia from now in
+    # Vinge's "A Deepenss in the Sky" becomes all that much more
+    # plausible.
+
+    # Even this next line by itself indicates that the whole "hey, isn't
+    # it great, Django abstracts out all the database details for you!"
+    # thing does not live up to its promise.  No matter how nice of a
+    # bow you put on it, your code is always spaghetti underneath.
+    dbinfo = desidb.settings.DATABASES['default']
+    engine = sqlalchemy.create_engine( f'postgresql://{dbinfo["USER"]}:{dbinfo["PASSWORD"]}'
+                                       f'@{dbinfo["HOST"]}:{dbinfo["PORT"]}/{dbinfo["NAME"]}' )
+
+    # And then *these* lines... don't get me started.  (More started.)
+    match = re.search( '^(.*)"."(.*)$', model._meta.db_table )
+    schema = match.group(1)
+    tablename = match.group(2)
+
+    try:
+        df.to_sql( tablename, schema=schema, con=engine, if_exists="append", index=False )
+    except Exception as e:
+        sys.stderr.write( "Something bad has happened.\n" )
+        import pdb; pdb.set_trace()
+        sys.stderr.write( "Uh huh." )
+
+
+def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
+
+    # For efficiency, the "skipcheck" field of hdumap gives us a set of
+    # columns to group things by and load all at once.
+    #
+    # We're going to assume that if something already exists in the
+    # database with the same combination of values in skipcheck as are
+    # found in columns in this dataframe, then we don't have to load any
+    # of this dataframe.
+    #
+    # If skipcheck is None, we load the whole dataframe in one go.
+    
+    # This isn't perfect.  It's conceivable that a dataframe might
+    # prevously have been partially loaded, and we want here to load the
+    # rest of it.  But, checking row by row is going to be a lot slower,
+    # so for efficiency I'm just doing it at once here.
+    
+    # Clean up the dataframe to what's expected
+    if hdumap[modeltable]['expect'] is not None:
+        df = df[ list( hdumap[modeltable]['expect'] ) ]
+    elif hdumap[modeltable]['ignore'] is not None:
+        cols = [ col for col in df.columns if col not in hdumap[modeltable]['ignore'] ]
+        df = df[ cols ]
+    else:
+        df = df.copy()
+
+    # And, yeah, I have to actually look at the opaque hidden primary id key
+    # created by Django, since I'm not using the Django idiom to add
+    # rows to the database here.
+    # $10 says that none of this code comes close to working with a future
+    # version of Django.
+    df[idcolumn] = idvalue
+        
+    skipcheck = hdumap[modeltable]['skipcheck']
+    if skipcheck is None:
+        _actually_actually_load( df, model )
+    else:
+        dexdf = df[skipcheck].groupby(skipcheck).first().reset_index()
+        # sys.stderr.write( f"Dividing {modeltable} into {len(dexdf)} subset.\n" )
+        for i in range(len(dexdf)):
+            row = dexdf.iloc[i]
+            kwargs = {}
+            for col in skipcheck:
+                kwargs[col] = row[col]
+                # There's probably a "to_dict" method I should be using here
+            existing = model.objects.filter( **kwargs )
+
+            if existing.count() > 0:
+                if hdumap[modeltable]['duplicates'] == 'skip':
                     continue
                 else:
-                    raise Exception( f"hdumap['{modeltable}']['duplicates'] has unknown value!" )
-            else:
-                raise e
-        except Exception as e:
-            sys.stderr.write( "OMG\n" )
-            import pdb; pdb.set_trace()
-            sys.stderr.write( "...\n" )
+                    raise EntryExistsError( f'Already have entries for {modeltable} with {kwargs}' )
+
+            # This next line is very pythonic and pandastic, but it's not *clear*
+            subdf = df[ sum( [ df[k]==v for k, v in kwargs.items() ] ) == len(kwargs) ]
+            # sys.stderr.write( f"Loading {len(subdf)} values for subset {i}\n" )
+            _actually_actually_load( subdf, model )
+
 
 # ======================================================================
 
@@ -366,7 +432,14 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
             df = bintables[ hdumap[modeltable]['hdu'] ]
 
             kwargs = { 'cumultile': cumultile }
-            _actually_load( df, hdumap, modeltable, kwargs, model )
+            try:
+                _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn='cumultile_id', idvalue=cumultile.id )
+            except EntryExistsError as ex:
+                if hdumap[modeltable]['duplicates'] == 'skip':
+                    # ¯\_(ツ)_/¯
+                    continue
+                else:
+                    raise ex
 
     # Done.  Return any mismatches form the parsing.
     return parseinfo
@@ -403,7 +476,7 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False )
             df = bintables[ hdumap[modeltable]['hdu'] ]
 
             kwargs = { 'healpix': healpixobj }
-            _actually_load( df, hdumap, modeltable, kwargs, model )
+            _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn='healpix_id', idvalue=healpixobj.id )
             
     # Done.  Return any mismatches form the parsing.
     return parseinfo
