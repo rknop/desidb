@@ -250,7 +250,7 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
                         
     # Raise an exception if there was a fatal parseinfo
     if not schemaok:
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         raise SchemaMismatchError( parseinfo )
 
     return hdumap, bintables, parseinfo

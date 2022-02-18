@@ -73,17 +73,17 @@ class Command(BaseCommand):
     def _print_schema_mismatch( self, data, loginfo=[], subject=None, noemail=False ):
         loginfo = self._build_schema_mismatch_info( data, loginfo=loginfo )
         self.logger.error( "\n".join( loginfo ) + "\n" )
-        if emailto is not None and not noemail:
-            email = email.EmailMessage()
-            email['To'] = self.emailto
-            email['From'] = self.emailfrom
+        if self.emailto is not None and not noemail:
+            emailmsg = email.message.EmailMessage()
+            emailmsg['To'] = self.emailto
+            emailmsg['From'] = self.emailfrom
             if subject is not None:
-                email['Subject'] = subject
+                emailmsg['Subject'] = subject
             else:
-                email['Subject'] = "Message from DesiDB loaddata Command"
-            email.set_content( "\n".join( loginfo ) + "\n" )
+                emailmsg['Subject'] = "Message from DesiDB loaddata Command"
+            emailmsg.set_content( "\n".join( loginfo ) + "\n" )
             with SMTP( "smtp.lbl.gov" ) as smtp:
-                smtp.send_message( email )
+                smtp.send_message( emailmsg )
 
 
     def _load_tile_night_directory( self, tile, night ):    
@@ -194,7 +194,7 @@ class Command(BaseCommand):
             raise NotImplementedError( "Need to call a subclass of db.management.commands.loaddata.Command" )
 
         if ( options['tile'] is not None ):
-            self._load_tile_directory( options['tile'], nightge=int(options['tiles_newer']) )
+            self._load_tile_directory( options['tile'], nightge=options['tiles_newer'] )
         else:
             if options['tiles_newer'] is not None:
                  startdate = int( otions['tiles_newer'] )
