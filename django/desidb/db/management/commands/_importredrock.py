@@ -45,6 +45,18 @@ class RRVersion:
 
         """
 
+        # Default: expect full schema match
+        hdumap = {
+            'TilesRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
+            'TilesFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
+            'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
+            'TilesTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
+        }
+        for key, val in hdumap.items():
+            val['ignore'] = set()
+            val['expect'] = None
+            val['map'] = {}
+
         if ( self.major == 0 ) and ( self.minor < 14 ):
             raise ValueError( f"Don't know how to deal with redrock version {self.major}.{self.minor}" )
         if ( self.major == 0 ) and ( self.minor == 14 ):
@@ -92,19 +104,11 @@ class RRVersion:
                     'map' : {}
                 }
             }
-        else:
-            # Default: expect full schema match
-            hdumap = {
-                'TilesRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
-                'TilesFibermap': { 'hdu': 'FIBERMAP', 'duplicates': 'error' },
-                'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP', 'duplicates': 'skip' },
-                'TilesTSNR2': { 'hdu': 'TSNR2', 'duplicates': 'error' }
-            }
-            for key, val in hdumap.items():
-                val['ignore'] = set()
-                val['expect'] = None
-                val['map'] = {}
-            return hdumap
+        elif ( self.major == 0 ) and ( self.minor == 15 ):
+            hdumap['TilesFibermap']['ignore'].update( ('sv2_mws_target', 'sv2_scnd_target',
+                                                       'sv2_desi_target', 'sv2_bgs_target' ) )
+
+        return hdumap
 
 
     def get_healpix_hdu_map( self ):
@@ -122,7 +126,7 @@ class RRVersion:
 
 # ======================================================================
 
-def _read_and_verify_fits( filepath, models, hdumap ):
+def _read_and_verify_fits( filepath, models, hdumap, rrver ):
     # I feel a bit queasy about this
     typematch = {
         'uint8' : django.db.models.SmallIntegerField,
@@ -138,6 +142,7 @@ def _read_and_verify_fits( filepath, models, hdumap ):
     bintables = _fits_bintables_to_pandas( filepath )
     parseinfo = {
         'filepath': str(filepath),
+        'rrver' : ( rrver.major, rrver.minor, rrver.stepping ),
         'missingdatablock': set(),
         'extradatablock': set(),
         'models': {}
@@ -201,6 +206,7 @@ def _read_and_verify_fits( filepath, models, hdumap ):
 
         # Go through the FITS columns and make sure that we expect each one of them,
         # and that the data types match.
+        # sys.stderr.write( f'Working on {modeltable}; ignore is {hdumap[modeltable]["ignore"]}\n' )
         for datacol in df.columns:
             if datacol in django_system_fields:
                 raise RuntimeError( f"Coding assumption error; fits column {datacol} "
@@ -220,6 +226,7 @@ def _read_and_verify_fits( filepath, models, hdumap ):
                     smm['coltypemismatch'].add( datacol )
                     schemaok = False
             except FieldDoesNotExist as ex:
+                # sys.stderr.write( f'We have an uh-oh at {datacol}\n' )
                 smm['missingfrommodel'].add( datacol )
                 schemaok = False
 
@@ -243,6 +250,7 @@ def _read_and_verify_fits( filepath, models, hdumap ):
                         
     # Raise an exception if there was a fatal parseinfo
     if not schemaok:
+        import pdb; pdb.set_trace()
         raise SchemaMismatchError( parseinfo )
 
     return hdumap, bintables, parseinfo
@@ -344,7 +352,7 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
         if len(current) > 0:
             raise EntryExistsError( f'Entry already exists: tile={tileid}, petal={petal}, night={night}' )
 
-    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap ) 
+    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap, rrver ) 
         
     if not donotload:
         # I'm assuming that no other process is loading at the same time.  We checked way up
@@ -384,7 +392,7 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False )
         if len(current) > 0:
             raise EntryExistsError( f'Entry already exists: healpix={healpix}, survey={survey}, program={program}' )
 
-    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap )
+    hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap, rrver )
 
     if not donotload:
         healpixobj = baseclass( healpix=healpix, survey=survey, program=program )
