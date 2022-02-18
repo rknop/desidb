@@ -17,10 +17,6 @@ class TilesRedshifts(db.models.CumulativeTilesRedshifts):
 
 
 class TilesFibermap(db.models.CumulativeTilesFibermap):
-    sv3_desi_target = models.BigIntegerField( null=True )
-    sv3_bgs_target = models.BigIntegerField( null=True )
-    sv3_mws_target = models.BigIntegerField( null=True )
-    sv3_scnd_target = models.BigIntegerField( null=True )
     
     cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
 
@@ -59,6 +55,7 @@ class HealpixRedshifts(db.models.HealpixRedshifts):
 
 
 class HealpixFibermap(db.models.HealpixFibermap):
+    
 
     healpix = models.ForeignKey( Healpix, on_delete=models.CASCADE )
 

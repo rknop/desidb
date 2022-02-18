@@ -45,6 +45,9 @@ class RRVersion:
 
         """
 
+        # SAD NOTE
+        # There are files with the same RRVER header file that have different schema :(
+        
         # Default: expect full schema match
         hdumap = {
             'TilesRedshifts': { 'hdu': 'REDSHIFTS', 'duplicates': 'error' },
@@ -73,8 +76,7 @@ class RRVersion:
                     'duplicates': 'skip',
                     'ignore' : { 'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
                                  'night', 'exptime', 'num_iter', 'psf_to_fiber_specflux', 'expid',
-                                 'fiberstatus', 'mjd',
-                                 'sv2_bgs_target', 'sv2_scnd_target', 'sv2_desi_target', 'sv2_mws_target' },
+                                 'fiberstatus', 'mjd' },
                     'expect' : None,
                     'map': {
                         'coadd_numexp': {
@@ -104,9 +106,6 @@ class RRVersion:
                     'map' : {}
                 }
             }
-        elif ( self.major == 0 ) and ( self.minor == 15 ):
-            hdumap['TilesFibermap']['ignore'].update( ('sv2_mws_target', 'sv2_scnd_target',
-                                                       'sv2_desi_target', 'sv2_bgs_target' ) )
 
         return hdumap
 
@@ -129,13 +128,14 @@ class RRVersion:
 def _read_and_verify_fits( filepath, models, hdumap, rrver ):
     # I feel a bit queasy about this
     typematch = {
-        'uint8' : django.db.models.SmallIntegerField,
-        'float32' : django.db.models.FloatField,
-        'float64' : django.db.models.FloatField,
-        'int16' : django.db.models.SmallIntegerField,
-        'int32' : django.db.models.IntegerField,
-        'int64' : django.db.models.BigIntegerField,
-        'object'  : django.db.models.CharField
+        'uint8' : [ django.db.models.SmallIntegerField ],
+        'float32' : [ django.db.models.FloatField ],
+        'float64' : [ django.db.models.FloatField ],
+        'int16' : [ django.db.models.SmallIntegerField, django.db.models.IntegerField,
+                    django.db.models.BigIntegerField ],
+        'int32' : [ django.db.models.IntegerField, django.db.models.BigIntegerField ],
+        'int64' : [ django.db.models.BigIntegerField ],
+        'object' : [ django.db.models.CharField ]
     }
     django_system_fields = [ 'id' ]
 
@@ -222,7 +222,7 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
                 dbcol = model._meta.get_field( datacol )
                 if datatype not in typematch.keys():
                     raise RuntimeError( f"Unknown type for FITS column {datacol}: {fitstype}" )
-                if type(dbcol) != typematch[datatype]:
+                if type(dbcol) not in typematch[datatype]:
                     smm['coltypemismatch'].add( datacol )
                     schemaok = False
             except FieldDoesNotExist as ex:

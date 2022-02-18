@@ -45,6 +45,8 @@ class Command(BaseCommand):
         parser.add_argument( '-d', '--healpixd100', default=None, type=int,
                              help=( 'Healpix / 100 (e.g. 381 loads all healpix 38100 through 38199 ). '
                                     'requires --survey and --program; default: load all' ) )
+        parser.add_argument( '--verify-only', default=False, action='store_true',
+                             help="Don't actually load, just verify that files work." )
 
     def _build_schema_mismatch_info( self, data, loginfo=[] ):
         loginfo = loginfo.copy()
@@ -89,7 +91,8 @@ class Command(BaseCommand):
     def _load_tile_night_directory( self, tile, night ):    
         for petal in range(0, 10):
             try:
-                data = import_tile_night_petal( self.basetiledir, tile, night, petal, self.models )
+                data = import_tile_night_petal( self.basetiledir, tile, night, petal, self.models,
+                                                donotload=self.donotload )
             except SchemaMismatchError as e:
                 loginfo = [ f"Schema mismatch error in tile {tile}, night {night}, petal {petal}" ]
                 self._print_schema_mismatch( e.data, loginfo, subject="DesidDB Schema Mismatch" )
@@ -114,13 +117,14 @@ class Command(BaseCommand):
                 self._load_tile_night_directory( tile, int(night.name) )
 
 
-    def _load_all_tiles_newer_than( sel, nightge ):
-        basedir = pathlib.Path( basetiledir )
+    def _load_all_tiles_newer_than( self, nightge ):
+        basedir = pathlib.Path( self.basetiledir )
         toload = []
-        if not basedir.is_direc():
-            raise RuntimeError( f"{str(basetiledir)} is not a directory" )
+        if not basedir.is_dir():
+            raise RuntimeError( f"{str(basedir)} is not a directory" )
         for tiledir in basedir.iterdir():
-            if self.numbersmatch.search( tiledir.name ) and tileidr.is_dir():
+            if self.numbersmatch.search( tiledir.name ) and tiledir.is_dir():
+                self.logger.debug( f'Looking in tile directory {tiledir}...' )
                 itile = int(tiledir.name)
                 for night in tiledir.iterdir():
                     if self.datematch.search( night.name ):
@@ -135,7 +139,7 @@ class Command(BaseCommand):
         ndone = 0
         for inight, itile in toload:
             self.logger.info( f"Loaded {ndone} of {len(toload)} tile/nights" )
-            self._load_tile_night_directory( itile, inight, nightge=nightge )
+            self._load_tile_night_directory( itile, inight )
             ndone += 1
 
 
@@ -150,7 +154,8 @@ class Command(BaseCommand):
                 self.logger.warning( "subdirectory {str(healpix)} isn't all numbers, skipping" )
             else:
                 try:
-                    data = import_healpix( self.basehealpixdir, survey, program, int(healpix.name), self.models )
+                    data = import_healpix( self.basehealpixdir, survey, program, int(healpix.name), self.models,
+                                           donotload=self.donotload )
                 except SchemaMismatchError as e:
                     loginfo = [ f"Schema mismatch error for survey {survey}, "
                                 f"program {program}, healpix {healpix.name}" ]
@@ -183,6 +188,8 @@ class Command(BaseCommand):
 
 
     def handle( self, **options ):
+        self.donotload = options['verify_only']
+        
         if options['verbosity'] > 1:
             self.logger.setLevel( logging.DEBUG )
         elif options['verbosity'] == 0:
@@ -197,7 +204,7 @@ class Command(BaseCommand):
             self._load_tile_directory( options['tile'], nightge=options['tiles_newer'] )
         else:
             if options['tiles_newer'] is not None:
-                 startdate = int( otions['tiles_newer'] )
+                 startdate = int( options['tiles_newer'] )
                  self._load_all_tiles_newer_than( startdate )
 
         if options['survey'] is not None:
