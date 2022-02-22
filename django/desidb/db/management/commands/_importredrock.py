@@ -8,14 +8,12 @@ from django.core.exceptions import FieldDoesNotExist
 import django.db
 from django.db import IntegrityError
 from psycopg2.errors import UniqueViolation
-# And, yes, we include a DIFFERENT orm to try to pair with the orm we're using!  Sigh.
-import sqlalchemy
-import sqlalchemy.exc
 from astropy.io import fits
 
 import desidb.settings
 
-from db.management.commands._import import _fits_bintables_to_pandas, EntryExistsError, SchemaMismatchError
+from db.management.commands._import import _fits_bintables_to_pandas, _pandas_to_postgresql_model
+from db.management.commands._import import TopLevelEntryExistsError, EntryExistsError, SchemaMismatchError
 
 # ======================================================================
     
@@ -34,10 +32,13 @@ class RRVersion:
     def get_tiles_hdu_map( self ):
         """A mapping of stuff in the FITS files to the database model.
 
+        This started fairly clean, and has become kind of a mess because
+        of having to deal with various special-case schema changes.
+
         It's a dictionary.  Each key is one of the database models:
         Redshifts, Fibermap, ExpFibermap, or TSNR2.  The Values are:
             hdu : name of the HDU that has the information for this table
-            duplicates : 'error', 'skip', 'verify', 'update', 'updateonce'
+            duplicates : 'error', 'skip', 'update'
             skipcheck : see _actually_load for documentation
             ignore : set of columns that should be ignored (expect all others; 'expect' should be None)
             expect : set of columns that we should expect (ignore all others; 'ignore' should be None)
@@ -46,8 +47,24 @@ class RRVersion:
                 otherhdumatchcolumn : column in other HDU
                 otherhdu : name of other HDU
                 column : column in other HDU with information
+            deduplication : if not None, then the pandas dataframe that results
+                            will be grouped on this list of columns
+                            (aggregating by 'first')
 
         All FITS column names have been converted to lower case.
+
+        WARNING : I'm using I-don't-think-it's-documetented behavior of
+        Django here.  I told Django to have a unique constraint on
+        cumultile, but of course we define that as a foreign key to a
+        whole *table*.  I know from looking at what happened to the
+        database that this meant the cretion of a column cumultile_id,
+        but I am not 100% sure we can actually depend on Django always
+        doing this.  Given everything I'm trying to knit together
+        (Django, Pandas, SQLalchemy so we can use Pandas to_sql, raw
+        PostgresSQL since pandas doesn't support updating exiting table
+        rows with data in the dataframe), there's probably not a "right"
+        way to even do this.  (Well, other than rolling your own and not
+        using big existing libraries....)
 
         """
         
@@ -62,7 +79,8 @@ class RRVersion:
             },
             'TilesFibermap': { 'hdu': 'FIBERMAP',
                                'skipcheck': None,
-                               'duplicates': 'error'
+                               'duplicates': 'update',
+                               'conflict_update': "(cumultile_id,targetid)"
             },
             'TilesExpFibermap': { 'hdu': 'EXP_FIBERMAP',
                                   'skipcheck': [ 'tileid',  'petal_loc', 'night', 'expid' ],
@@ -91,7 +109,8 @@ class RRVersion:
                 'TilesFibermap': {
                     'hdu' : 'FIBERMAP',
                     'skipcheck': None,
-                    'duplicates': 'skip',
+                    'duplicates': 'update',
+                    'conflict_update': "(cumultile_id,targetid)",
                     'ignore' : { 'fiber_ra', 'fiber_dec', 'fiber_x', 'fiber_y', 'delta_x', 'delta_y',
                                  'night', 'exptime', 'num_iter', 'psf_to_fiber_specflux', 'expid',
                                  'fiberstatus', 'mjd' },
@@ -111,11 +130,12 @@ class RRVersion:
                             'column' : 'numtile',
                             'typeconv': numpy.int16
                         }
-                    }
+                    },
+                    'deduplication': [ 'targetid' ]
                 },
                 'TilesExpFibermap': {
                     'hdu' : 'FIBERMAP',
-                    'skipcheck': [ 'tileid', 'night', 'expid' ],
+                    'skipcheck': [ 'tileid', 'petal_loc', 'night', 'expid' ],
                     'duplicates': 'skip',
                     'ignore' : None,
                     'expect' :  { 'targetid', 'tileid', 'petal_loc', 'fiber',
@@ -212,6 +232,13 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
             maindf = pandas.concat( [ maindf, othercol ], axis=1 )
             maindf.reset_index(inplace=True)
             bintables[hdu] = maindf
+
+    # Deduplicate if necessary
+    for modeltable in hdumap.keys():
+        modmap = hdumap[modeltable]
+        if 'deduplication' in modmap.keys():
+            df = bintables[ modmap['hdu'] ].groupby( modmap['deduplication'] ).aggregate( 'first' ).reset_index()
+            bintables[ modmap['hdu'] ] = df
             
     # Verify that either all expected columns are there or no ignored columns are there,
     #   and that dataytypes between FITS and Django match
@@ -284,39 +311,7 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
 
 # ======================================================================
 
-def _actually_actually_load( df, model ):
-    # And now we load it.  OMG.  Frankenstein's monster was not fiction.
-    # Stitching together Pandas, Django, and Postgresql here is a case
-    # study in trying to use libraries but then layering on other
-    # gigantically heavy libraries because the two libraries you really
-    # want don't play nicely together.  This, folks, is modern
-    # programming, and it's only going to get worse.  The Unix epoch
-    # being underneath all of the computer code millenia from now in
-    # Vinge's "A Deepenss in the Sky" becomes all that much more
-    # plausible.
-
-    # Even this next line by itself indicates that the whole "hey, isn't
-    # it great, Django abstracts out all the database details for you!"
-    # thing does not live up to its promise.  No matter how nice of a
-    # bow you put on it, your code is always spaghetti underneath.
-    dbinfo = desidb.settings.DATABASES['default']
-    engine = sqlalchemy.create_engine( f'postgresql://{dbinfo["USER"]}:{dbinfo["PASSWORD"]}'
-                                       f'@{dbinfo["HOST"]}:{dbinfo["PORT"]}/{dbinfo["NAME"]}' )
-
-    # And then *these* lines... don't get me started.  (More started.)
-    match = re.search( '^(.*)"."(.*)$', model._meta.db_table )
-    schema = match.group(1)
-    tablename = match.group(2)
-
-    try:
-        df.to_sql( tablename, schema=schema, con=engine, if_exists="append", index=False )
-    except Exception as e:
-        sys.stderr.write( "Something bad has happened.\n" )
-        import pdb; pdb.set_trace()
-        sys.stderr.write( "Uh huh." )
-
-
-def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
+def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue, logger=None ):
 
     # For efficiency, the "skipcheck" field of hdumap gives us a set of
     # columns to group things by and load all at once.
@@ -324,7 +319,13 @@ def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
     # We're going to assume that if something already exists in the
     # database with the same combination of values in skipcheck as are
     # found in columns in this dataframe, then we don't have to load any
-    # of this dataframe.
+    # of this dataframe.  In practice, I use this for ExpFibermap.  If
+    # the same object is observed on a later date, it will include all
+    # observations of that tile/target in the EXP_FIBERMAP HDU of the
+    # FITS files, the latest of which is only new; the earlier ones are
+    # copies of stuff already in the database.  So, I do the skipcheck
+    # to see if should skip loading blocks of ExpFibermap that (at least
+    # partially) already exist.
     #
     # If skipcheck is None, we load the whole dataframe in one go.
     
@@ -335,10 +336,11 @@ def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
     
     # Clean up the dataframe to what's expected
     if hdumap[modeltable]['expect'] is not None:
-        df = df[ list( hdumap[modeltable]['expect'] ) ]
+        cols = [ col for col in df.columns if col in hdumap[modeltable]['expect'] ]
+        df = df[ cols ].copy()
     elif hdumap[modeltable]['ignore'] is not None:
         cols = [ col for col in df.columns if col not in hdumap[modeltable]['ignore'] ]
-        df = df[ cols ]
+        df = df[ cols ].copy()
     else:
         df = df.copy()
 
@@ -350,8 +352,12 @@ def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
     df[idcolumn] = idvalue
         
     skipcheck = hdumap[modeltable]['skipcheck']
+    duplicates = hdumap[modeltable]['duplicates']
+    conflict_update = ( hdumap[modeltable]['conflict_update']
+                        if 'conflict_update' in hdumap[modeltable].keys()
+                        else None )
     if skipcheck is None:
-        _actually_actually_load( df, model )
+        _pandas_to_postgresql_model( df, model, duplicates, conflict_update=conflict_update, logger=logger )
     else:
         dexdf = df[skipcheck].groupby(skipcheck).first().reset_index()
         # sys.stderr.write( f"Dividing {modeltable} into {len(dexdf)} subset.\n" )
@@ -365,19 +371,20 @@ def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue ):
 
             if existing.count() > 0:
                 if hdumap[modeltable]['duplicates'] == 'skip':
-                    continue
+                    if logger is not None:
+                        logger.info( f'Already have entries for {modeltable} with {kwargs}, skipping insert.' )
                 else:
                     raise EntryExistsError( f'Already have entries for {modeltable} with {kwargs}' )
 
             # This next line is very pythonic and pandastic, but it's not *clear*
             subdf = df[ sum( [ df[k]==v for k, v in kwargs.items() ] ) == len(kwargs) ]
             # sys.stderr.write( f"Loading {len(subdf)} values for subset {i}\n" )
-            _actually_actually_load( subdf, model )
+            _pandas_to_postgresql_model( subdf, model, duplicates, conflict_update=conflict_update, logger=logger )
 
 
 # ======================================================================
 
-def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=False ):
+def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=False, logger=None ):
     """Try to import a redrock-*.fits or zbest-*.fits file into the database.
 
     * basedir should be a "tiles" subdirectory of some sort, containing all the tileid subdirectories.
@@ -416,7 +423,7 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
     if not donotload:
         current = baseclass.objects.filter( tileid=tileid ).filter( petal=petal ).filter( night=night )
         if len(current) > 0:
-            raise EntryExistsError( f'Entry already exists: tile={tileid}, petal={petal}, night={night}' )
+            raise TopLevelEntryExistsError( f'Entry already exists: tile={tileid}, petal={petal}, night={night}' )
 
     hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap, rrver ) 
         
@@ -433,7 +440,9 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
 
             kwargs = { 'cumultile': cumultile }
             try:
-                _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn='cumultile_id', idvalue=cumultile.id )
+                _actually_load( df, hdumap, modeltable, kwargs, model,
+                                idcolumn='cumultile_id', idvalue=cumultile.id,
+                                logger=logger )
             except EntryExistsError as ex:
                 if hdumap[modeltable]['duplicates'] == 'skip':
                     # ¯\_(ツ)_/¯
@@ -446,7 +455,7 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
 
 # ======================================================================
 
-def import_healpix( basedir, survey, program, healpix, models, donotload=False ):
+def import_healpix( basedir, survey, program, healpix, models, donotload=False, logger=None ):
     basedir = pathlib.Path( basedir )
     direc = basedir / survey / program / str(healpix // 100) / str(healpix)
     if not direc.is_dir():
@@ -463,7 +472,8 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False )
     if not donotload:
         current = baseclass.objects.filter( healpix=healpix ).filter( survey=survey ).filter( program=program )
         if len(current) > 0:
-            raise EntryExistsError( f'Entry already exists: healpix={healpix}, survey={survey}, program={program}' )
+            raise TopLevelEntryExistsError( f'Entry already exists: healpix={healpix}, '
+                                            f'survey={survey}, program={program}' )
 
     hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap, rrver )
 
@@ -476,7 +486,9 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False )
             df = bintables[ hdumap[modeltable]['hdu'] ]
 
             kwargs = { 'healpix': healpixobj }
-            _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn='healpix_id', idvalue=healpixobj.id )
+            _actually_load( df, hdumap, modeltable, kwargs, model,
+                            idcolumn='healpix_id', idvalue=healpixobj.id,
+                            logger=logger )
             
     # Done.  Return any mismatches form the parsing.
     return parseinfo

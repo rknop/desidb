@@ -213,7 +213,8 @@ class CumulativeTiles(models.Model):
     tileid = models.IntegerField( null=False )
     petal = models.SmallIntegerField( null=False )
     night = models.IntegerField( null=False )
-
+    filename = models.TextField( null=False, default="" )
+    
     class Meta:
         abstract = True
         ordering = [ "tileid", "petal", "night" ]
@@ -303,6 +304,7 @@ class Healpix(models.Model):
     healpix = models.IntegerField( null=False )
     survey = models.TextField( null=False )
     program = models.TextField( null=False )
+    filename = models.TextField( null=False, default="" )
 
     class Meta:
         abstract = True
