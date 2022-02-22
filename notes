@@ -42,3 +42,13 @@ top.)  (For schema creation, only include the user creation in the *very*
 first one.  Change everest, of course, to whatever the schema is.)
 
 
+======================================================================
+
+USERS
+
+There aren't built-in schema files for creating the users.  I did this
+manually.
+
+  python manage.py createsuperuser --username=admin --email=raknop@lbl.gov
+  
+I then manually added the "desi" user with the standard desi password.

@@ -383,6 +383,9 @@ def _actually_load( df, hdumap, modeltable, kwargs, model, idcolumn, idvalue, lo
 
 
 # ======================================================================
+# NOTE : I've got the fact that the root directory is /data
+# (mounted from /global/cfs/cdirs/desi/spectro/redux)
+#  hardcoded below!  This is suboptimal.
 
 def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=False, logger=None ):
     """Try to import a redrock-*.fits or zbest-*.fits file into the database.
@@ -415,6 +418,10 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
     else:
         raise FileNotFoundError( f"Did not find {redrock} or {zbest}" )
 
+    if str(filetoread)[0:6] != "/data/":
+        raise ValueError( f'Trying to reading file {str(filetoread)} which doesn\'t start with /data/!' )
+    relfilepath = str(filetoread)[6:]
+    
     with fits.open( filetoread, memmap=False ) as hdul:
         rrver = RRVersion( hdul[0].header['RRVER'] )
     hdumap = rrver.get_tiles_hdu_map()
@@ -431,7 +438,7 @@ def import_tile_night_petal( basedir, tileid, night, petal, models, donotload=Fa
         # I'm assuming that no other process is loading at the same time.  We checked way up
         # at the top that this entry didn't already exist.  If multiple processes are doing
         # this at once, I'm writing in a race condition here....
-        cumultile = baseclass( tileid=tileid, petal=petal, night=night )
+        cumultile = baseclass( tileid=tileid, petal=petal, night=night, filename=relfilepath )
         cumultile.save()
 
         for modeltable in hdumap.keys():
@@ -464,6 +471,10 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False, 
     if not filetoread.is_file():
         raise FileNotFoundError( f"{str(filetoread)} isn't an existing regular file" )
 
+    if str(filetoread)[0:6] != "/data/":
+        raise ValueError( f'Trying to reading file {str(filetoread)} which doesn\'t start with /data/!' )
+    relfilepath = str(filetoread)[6:]
+    
     with fits.open( filetoread, memmap=False ) as hdul:
         rrver = RRVersion( hdul[0].header['RRVER'] )
     hdumap = rrver.get_healpix_hdu_map()
@@ -478,7 +489,7 @@ def import_healpix( basedir, survey, program, healpix, models, donotload=False, 
     hdumap, bintables, parseinfo = _read_and_verify_fits( filetoread, models, hdumap, rrver )
 
     if not donotload:
-        healpixobj = baseclass( healpix=healpix, survey=survey, program=program )
+        healpixobj = baseclass( healpix=healpix, survey=survey, program=program, filename=relfilepath )
         healpixobj.save()
 
         for modeltable in hdumap.keys():

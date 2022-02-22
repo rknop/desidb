@@ -25,7 +25,7 @@ SECRET_KEY = 'o5-_ga4(@=n4y$my%d(1v^wqjq#(%(lid-p0uwd43qi=dyw0^5'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [ 'desidb.desidb.production.svc.spin.nersc.org' ]
 
 
 # Application definition
@@ -58,7 +58,7 @@ ROOT_URLCONF = 'desidb.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [ os.path.join( BASE_DIR, 'templates' ) ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -129,3 +129,5 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
 STATIC_URL = '/static/'
+
+LOGIN_REDIRECT_URL = '/'
