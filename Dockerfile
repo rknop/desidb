@@ -1,10 +1,10 @@
 FROM rknop/devuan-chimaera-rknop
 MAINTAINER Rob Knop <raknop@lbl.gov>
 
-# ARG UID=95089
-# ARG GID=45703
-ARG UID=1000
-ARG GID=1000
+ARG UID=95089
+ARG GID=45703
+# ARG UID=1000
+# ARG GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -136,6 +136,9 @@ USER $UID:$GID
 # Make sure astropy has done whatever junk it does upon first import
 RUN python -c "import astropy"
 RUN python -c "import astropy.io.fits"
+
+# Get the "update" script
+COPY update_daily.sh /home/user/update_daily.sh
 
 RUN apachectl start
 
