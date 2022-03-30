@@ -13,6 +13,13 @@ class LongNameBTreeIndex(indexes.BTreeIndex):
     def max_name_length(self):
         return 63 - len(models.Index.suffix) + len(self.suffix)
 
+# Allow for a 4-byte real
+
+class RealField(models.FloatField):
+    description = "4-byte float"
+    def db_type(self, connection):
+        return 'real'
+    
 # ======================================================================
 # Base Classes that are extended separately for tiles and healpix files
 
@@ -372,3 +379,210 @@ class HealpixTSNR2(TSNR2):
         ]
         unique_together = [ [ 'healpix', 'targetid' ] ]
 
+
+# ======================================================================
+# dbid is an internally generated private key.  I didn't feel confidence
+# that anything else was guaranteed to be unique
+#
+# Loaded from a directory like target/catalogs/dr9/1.1.1/main/resolve/dark
+# Database fields corresponding to directories:
+#   catalog : dr9
+#   catver : 1.1.1
+#   whenobs : dark
+#
+# whenobs will be "bright", "dark", or "backup"
+#
+# Directories that I intend to search to load this table:
+# target/catalogs/dr9/0.51.0/targets/sv1/resolve      (SV1)
+# target/catalogs/dr9/0.53.0/targets/sv2/resolve      (SV2)
+# target/catalogs/dr9/0.57.0/targets/sv3/resolve      (SV3)
+# target/catalogs/dr9/1.1.1/targets/main/resolve      (Main Survey)
+# target/catalogs/gaiadr2/2.2.0/targets/main/resolve  (Backup Targets)
+#
+# Everything else is out of the FITS files
+
+class MainTargets(models.Model):
+    dbid = models.BigAutoField( primary_key=True )
+    catalog = models.TextField( null=True )
+    catver = models.TextField( null=True )
+    whenobs = models.TextField( null=True )
+    release = models.SmallIntegerField( null=True )
+    brickid = models.IntegerField( null=True )
+    brickname = models.CharField( max_length=8, null=True )
+    brick_objid = models.IntegerField( null=True )
+    morphtype = models.CharField( max_length=4, null=True )
+    ra = models.FloatField()
+    ra_ivar = RealField( null=True )
+    dec = models.FloatField()
+    dec_ivar = RealField( null=True )
+    dchisq = RealField( null=True )
+    ebv = RealField( null=True )
+    flux_g = RealField( null=True )
+    flux_r = RealField( null=True )
+    flux_z = RealField( null=True )
+    flux_ivar_g = RealField( null=True )
+    flux_ivar_r = RealField( null=True )
+    flux_ivar_z = RealField( null=True )
+    mw_transmission_g = RealField( null=True )
+    mw_transmission_r = RealField( null=True )
+    mw_transmission_z = RealField( null=True )
+    fracflux_g = RealField( null=True )
+    fracflux_r = RealField( null=True )
+    fracflux_z = RealField( null=True )
+    fracmasked_g = RealField( null=True )
+    fracmasked_r = RealField( null=True )
+    fracmasked_z = RealField( null=True )
+    fracin_g = RealField( null=True )
+    fracin_r = RealField( null=True )
+    fracin_z = RealField( null=True )
+    nobs_g = models.SmallIntegerField( null=True )
+    nobs_r = models.SmallIntegerField( null=True )
+    nobs_z = models.SmallIntegerField( null=True )
+    psfdepth_g = RealField( null=True )
+    psfdepth_r = RealField( null=True )
+    psfdepth_z = RealField( null=True )
+    galdepth_g = RealField( null=True )
+    galdepth_r = RealField( null=True )
+    galdepth_z = RealField( null=True )
+    flux_w1 = RealField( null=True )
+    flux_w2 = RealField( null=True )
+    flux_w3 = RealField( null=True )
+    flux_w4 = RealField( null=True )
+    flux_ivar_w1 = RealField( null=True )
+    flux_ivar_w2 = RealField( null=True )
+    flux_ivar_w3 = RealField( null=True )
+    flux_ivar_w4 = RealField( null=True )
+    mw_transmission_w1 = RealField( null=True )
+    mw_transmission_w2 = RealField( null=True )
+    mw_transmission_w3 = RealField( null=True )
+    mw_transmission_w4 = RealField( null=True )
+    allmask_g = models.SmallIntegerField( null=True )
+    allmask_r = models.SmallIntegerField( null=True )
+    allmask_z = models.SmallIntegerField( null=True )
+    fiberflux_g = RealField( null=True )
+    fiberflux_r = RealField( null=True )
+    fiberflux_z = RealField( null=True )
+    fibertotflux_g = RealField( null=True )
+    fibertotflux_r = RealField( null=True )
+    fibertotflux_z = RealField( null=True )
+    ref_epoch = RealField( null=True )
+    wisemask_w1 = models.SmallIntegerField( null=True )
+    wisemask_w2 = models.SmallIntegerField( null=True )
+    maskbits = models.SmallIntegerField( null=True )
+    lc_flux_w1 = RealField( null=True )
+    lc_flux_w2 = RealField( null=True )
+    lc_flux_ivar_w1 = RealField( null=True )
+    lc_flux_ivar_w2 = RealField( null=True )
+    lc_nobs_w1 = models.SmallIntegerField( null=True )
+    lc_nobs_w2 = models.SmallIntegerField( null=True )
+    lc_mjd_w1 = models.FloatField( null=True )
+    lc_mjd_w2 = models.FloatField( null=True )
+    shape_r = RealField( null=True )
+    shape_e1 = RealField( null=True )
+    shape_e2 = RealField( null=True )
+    shape_r_ivar = RealField( null=True )
+    shape_e1_ivar = RealField( null=True )
+    shape_e2_ivar = RealField( null=True )
+    sersic = RealField( null=True )
+    sersic_ivar = RealField( null=True )
+    ref_id = models.BigIntegerField( null=True )
+    ref_cat = models.CharField( max_length=2, null=True )
+    gaia_phot_g_mean_mag = RealField( null=True )
+    gaia_phot_g_mean_flux_over_error = RealField( null=True )
+    gaia_phot_bp_mean_mag = RealField( null=True )
+    gaia_phot_bp_mean_flux_over_error = RealField( null=True )
+    gaia_phot_rp_mean_mag = RealField( null=True )
+    gaia_phot_rp_mean_flux_over_error = RealField( null=True )
+    gaia_phot_bp_rp_excess_factor = RealField( null=True )
+    gaia_astrometric_excess_noise = RealField( null=True )
+    gaia_duplicated_source = models.BooleanField( null=True )
+    gaia_astrometric_sigma5d_max = RealField( null=True )
+    gaia_astrometric_params_solved = models.SmallIntegerField( null=True )
+    parallax = RealField( null=True )
+    parallax_ivar = RealField( null=True )
+    pmra = RealField( null=True )
+    pmra_ivar = RealField( null=True )
+    pmdec = RealField( null=True )
+    pmdec_ivar = RealField( null=True )
+    photsys = models.CharField( max_length=1, null=True )
+    targetid = models.BigIntegerField( null=True )
+    desi_target = models.BigIntegerField( null=True )
+    bgs_target = models.BigIntegerField( null=True )
+    mws_target = models.BigIntegerField( null=True )
+    subpriority = models.FloatField( null=True )
+    obsconditions = models.BigIntegerField( null=True )
+    priority_init = models.BigIntegerField( null=True )
+    numobs_init = models.BigIntegerField( null=True )
+    scnd_target = models.BigIntegerField( null=True )
+    hpxpixel = models.BigIntegerField( null=True )
+
+    class Meta:
+        db_table = '"general"."maintargets"'
+        indexes = [
+            LongNameBTreeIndex( fields=['catalog', 'catver', 'whenobs'], name='idx_maintargets_direc' ),
+            LongNameBTreeIndex( fields=['targetid'], name='idx_maintargets_targetid' ),
+            LongNameBTreeIndex( fields=['desi_target'], name='idx_maintargets_desi_target' ),
+            LongNameBTreeIndex( fields=['bgs_target'], name='idx_maintargets_bgs_target' ),
+            LongNameBTreeIndex( fields=['mws_target'], name='idx_maintargets_mws_target' ),
+            LongNameBTreeIndex( fields=['scnd_target'], name='idx_maintargets_scnd_target' ),
+            LongNameBTreeIndex( fields=['hpxpixel'], name='idx_maintargets_hpxpixel' ),
+            LongNameBTreeIndex( q3c_ang2ipix( 'ra', 'dec' ), name='idx_maintargets_q3c' ),
+        ]
+            
+# ======================================================================
+# dbid is internally generated
+#
+# Loaded from a file like target/catalogs/dr9/1.1.1/targets/main/secondary/dark/targets-dark-secondary.fits
+# Database fields corresponding to directories:
+#   catalog : dr9
+#   catver : 1.1.1
+#   whenobs : dark
+#
+# I *think *whenobs* is only 'bright' or 'dark'
+#
+# Everything else is from the FITS files
+#
+# Directories I intend to search to fill this:
+# target/catalogs/dr9/1.1.0/targets/main/secondary
+# target/catalogs/dr9/1.3.0/targets/main2/secondary
+
+class SecondaryTargets(models.Model):
+    dbid = models.BigAutoField( primary_key=True )
+    catalog = models.TextField( null=True )
+    catver = models.TextField( null=True )
+    whenobs = models.TextField( null=True )
+    ra = models.FloatField()
+    dec = models.FloatField()
+    pmra = RealField( null=True )
+    pmdec = RealField( null=True )
+    ref_epoch = RealField( null=True )
+    override = models.BooleanField( null=True )
+    flux_g = RealField( null=True )
+    flux_r = RealField( null=True )
+    flux_z = RealField( null=True )
+    parallax = RealField( null=True )
+    gaia_phot_g_mean_mag = RealField( null=True )
+    gaia_phot_bp_mean_mag = RealField( null=True )
+    gaia_phot_rp_mean_mag = RealField( null=True )
+    gaia_astrometric_excess_noise = RealField( null=True )
+    targetid = models.BigIntegerField( null=True )
+    desi_target = models.BigIntegerField( null=True )
+    scnd_target = models.BigIntegerField( null=True )
+    scnd_order = models.IntegerField( null=True )
+    subpriority = models.FloatField( null=True )
+    obsconditions = models.BigIntegerField( null=True )
+    priority_init = models.BigIntegerField( null=True )
+    numobs_init = models.BigIntegerField( null=True )
+
+    class Meta:
+        db_table = '"general"."secondarytargets"'
+        indexes = [
+            LongNameBTreeIndex( fields=['catalog', 'catver', 'whenobs'], name='idx_secondarytargets_direc' ),
+            LongNameBTreeIndex( fields=['targetid'], name='idx_secondarytargets_targetid' ),
+            LongNameBTreeIndex( fields=['desi_target'], name='idx_secondarytargets_desi_target' ),
+            LongNameBTreeIndex( fields=['scnd_target'], name='idx_secondarytargets_scnd_target' ),
+            LongNameBTreeIndex( q3c_ang2ipix( 'ra', 'dec' ), name='idx_secondarytargets_q3c' ),
+        ]
+    
+
+    

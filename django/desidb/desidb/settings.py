@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'db.apps.DbConfig',
     'everest.apps.EverestConfig',
     'fuji.apps.FujiConfig',
+    'guadalupe.apps.GuadalupeConfig',
     'daily.apps.DailyConfig',
     'django.contrib.admin',
     'django.contrib.auth',

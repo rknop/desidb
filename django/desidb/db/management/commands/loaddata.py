@@ -5,6 +5,7 @@ import pathlib
 import logging
 from smtplib import SMTP
 import email.message
+import django.db.models
 from django.core.management.base import BaseCommand, CommandError
 from db.management.commands._importredrock import import_tile_night_petal, import_healpix
 from db.management.commands._import import SchemaMismatchError, TopLevelEntryExistsError
@@ -36,8 +37,15 @@ class Command(BaseCommand):
         parser.add_argument( '-t', '--tile', default=None, type=int,
                              help="Load all petals of all nights of this tile from <base>/tiles/cumulative" )
         parser.add_argument( '-n', '--tiles-newer', default=None, type=int,
-                             help=( "yyyymmdd ; load all tiles in subdirectories of this date or newer. "
+                             help=( "yyyymmdd ; load all tiles in subdirectories of this date or newer (>=). "
                                     "With --tile, only in that tile subdirectory otherwise for all tiles" ) )
+        parser.add_argument( '-o', '--tiles-older', default=None, type=int,
+                             help=( "yyyymmdd ; use with --tiles-newer ; only load tiles in subdirectories "
+                                    "that are older than this date (<)." ) )
+        parser.add_argument( "-a", '--auto-newer', default=False, action='store_true',
+                             help=( "Automatcially load everything that is in a yyyymmdd directory that's "
+                                    "equal to or newer than the latest yyyymmdd found in the database. "
+                                    "Do not combine with --tiles-newer or --tile, OK to use with --tiles-older" ) )
         parser.add_argument( '-s', '--survey', default=None, type=str,
                              help="Load healpix for this survey (e.g. 'main', 'sv1', 'sv2', or 'sv3')" )
         parser.add_argument( '-p', '--program', default=None, type=str,
@@ -99,12 +107,16 @@ class Command(BaseCommand):
                 raise e
             except FileNotFoundError as e:
                 self.logger.warning( f"FileNotFoundError for tile {tile}, night {night}, "
-                                     f"petal {petal}: {str(e)}" )
+                                     f"petal {petal}, skipping: {str(e)}" )
+                continue
+            except TopLevelEntryExistsError as e:
+                self.logger.warning( f"cumulative_tiles already exists for tile {tile},"
+                                     f"night {night}, petal {petal}, skipping." )
                 continue
             self.logger.info( f"Imported tile {tile:6d}, night {night}, petal {petal}" )
             self.logger.debug( "\n".join( self._build_schema_mismatch_info( data ) ) )
 
-    def _load_tile_directory( self, tile, nightge=None ):
+    def _load_tile_directory( self, tile, nightge=None, nightlt=None ):
         tiledir = pathlib.Path( self.basetiledir ) / str(tile)
         if not tiledir.is_dir():
             raise Exception( f"Tiles directory {str(tiledir)} isn't a directory" )
@@ -112,12 +124,16 @@ class Command(BaseCommand):
             if not self.datematch.search( night.name ):
                 self.logger.warning( "Subdirectory {night.name} doesn't match yyyymmdd, skipping" )
             else:
-                if ( nightge is not None ) and ( int(night.name) < int(nightge) ):
+                nightge = 0 if nightge is None else int(nightge)
+                nightlt = 99999999 if nightlt is None else int(nightlt)
+                if ( int(night.name) < nightge ) or ( int(night.name) >= lightlt ):
                     continue
                 self._load_tile_night_directory( tile, int(night.name) )
 
 
-    def _load_all_tiles_newer_than( self, nightge ):
+    def _load_all_tiles_newer_than( self, nightge, nightlt=None ):
+        if nightlt is None:
+            nightlt = 99999999
         basedir = pathlib.Path( self.basetiledir )
         toload = []
         if not basedir.is_dir():
@@ -129,7 +145,7 @@ class Command(BaseCommand):
                 for night in tiledir.iterdir():
                     if self.datematch.search( night.name ):
                         inight = int(night.name)
-                        if inight >= nightge:
+                        if inight >= nightge and inight < nightlt:
                             toload.append( ( inight, itile ) )
         self.logger.debug( f"...made list of {len(toload)} yyyymmdd directories." )
 
@@ -210,11 +226,19 @@ class Command(BaseCommand):
             raise NotImplementedError( "Need to call a subclass of db.management.commands.loaddata.Command" )
 
         if ( options['tile'] is not None ):
-            self._load_tile_directory( options['tile'], nightge=options['tiles_newer'] )
+            self._load_tile_directory( options['tile'],
+                                       night=options['tiles_newer'] )
         else:
-            if options['tiles_newer'] is not None:
-                 startdate = int( options['tiles_newer'] )
-                 self._load_all_tiles_newer_than( startdate )
+            if options['auto_newer'] or options['tiles_newer'] is not None:
+                if options['tiles_newer'] is not None:
+                    if options['auto_newer']:
+                        raise RuntimeError( "Don't use --auto-newer and --tiles-newer together." )
+                    startdate = int( options['tiles_newer'] )
+                else:
+                    maxnight = self.models.CumulativeTiles.objects.aggregate( django.db.models.Max('night') )
+                    startdate = maxnight['night__max']
+                enddate = None if options['tiles_older'] is None else int( options['tiles_older'] )
+                self._load_all_tiles_newer_than( startdate, enddate )
 
         if options['survey'] is not None:
             if options['program'] is not None:
