@@ -14,7 +14,7 @@ RUN apt-get update && \
                        libboost-all-dev libcfitsio-dev libblas-dev liblapack-dev libbz2-dev \
                        python3-numpy python3-scipy python3-numba python3-matplotlib \
                        python3-fitsio python3-sqlalchemy python3-yaml python3-pandas \
-                       curl git && \
+                       curl git tmux && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -35,7 +35,7 @@ RUN pip3 install \
       markdown==3.3.6 \
       django-filter==21.1 \
       speclite \
-      iniparser \
+      iniparse \
       astropy && \
     rm -rf /tmp/home/.cache/pip
 
