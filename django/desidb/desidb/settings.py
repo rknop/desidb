@@ -36,6 +36,8 @@ INSTALLED_APPS = [
     'fuji.apps.FujiConfig',
     'guadalupe.apps.GuadalupeConfig',
     'daily.apps.DailyConfig',
+    'himalayas.apps.HimalayasConfig',
+    'iron.apps.IronConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
