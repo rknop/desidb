@@ -168,7 +168,10 @@ class ExpFibermap(models.Model):
     fiber_ra = models.FloatField( null=True )
     fiber_dec = models.FloatField( null=True )
     psf_to_fiber_specflux = models.FloatField( null=True )
-
+    in_coadd_b = models.BooleanField( null=True )
+    in_coadd_r = models.BooleanField( null=True )
+    in_coadd_z = models.BooleanField( null=True )
+    
     class Meta:
         abstract = True
 
