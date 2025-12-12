@@ -183,7 +183,7 @@ def _read_and_verify_fits( filepath, models, hdumap, rrver ):
                     django.db.models.BigIntegerField ],
         'int32' : [ django.db.models.IntegerField, django.db.models.BigIntegerField ],
         'int64' : [ django.db.models.BigIntegerField ],
-        'object' : [ django.db.models.CharField ]
+        'object' : [ django.db.models.CharField, django.db.models.TextField ]
     }
     django_system_fields = [ 'id' ]
 
