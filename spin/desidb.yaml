@@ -31,7 +31,7 @@ spec:
           value: /secrets/pgpasswd
         - name: POSTGRES_USER
           value: postgres
-        image: rknop/desidb-django
+        image: registry.nersc.gov/desi/rknop/desidb-django:20251212
         imagePullPolicy: Always
         name: desidb
         resources: {}
