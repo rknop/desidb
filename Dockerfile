@@ -1,27 +1,33 @@
-FROM rknop/devuan-chimaera-rknop
-MAINTAINER Rob Knop <raknop@lbl.gov>
+# docker build -t registry.nersc.gov/desi/rknop/desidb-django:20251212 .
+
+# ======================================================================
+
+FROM debian:bookworm-20251208 AS base
+LABEL maintainer="Rob Knop <raknop@lbl.gov>"
 
 ARG UID=95089
 ARG GID=45703
 # ARG UID=1000
 # ARG GID=1000
 
+SHELL ["/bin/bash", "-c"]
+
 ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ="UTC"
+
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y sudo python3 python3-pip apache2 libapache2-mod-wsgi-py3 \
-                       python3-psycopg2 postgresql-client \
-                       libboost-all-dev libcfitsio-dev libblas-dev liblapack-dev libbz2-dev \
-                       python3-numpy python3-scipy python3-numba python3-matplotlib \
-                       python3-fitsio python3-sqlalchemy python3-yaml python3-pandas \
-                       curl git tmux && \
+    apt-get -y install -y sudo python3 python3-pip python3-venv apache2 libapache2-mod-wsgi-py3 \
+                          python3-psycopg2 postgresql-client \
+                          libboost-all-dev libcfitsio-dev libblas-dev liblapack-dev libbz2-dev \
+                          python3-numpy python3-scipy python3-numba python3-matplotlib \
+                          python3-fitsio python3-sqlalchemy python3-yaml python3-pandas \
+                          curl git tmux && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
 RUN mkdir /tmp/home
-ENV HOME /tmp/home
+ENV HOME=/tmp/home
 WORKDIR /tmp/home
 
 # Note that pyyaml changes how .load works in version 6.0,
@@ -29,11 +35,16 @@ WORKDIR /tmp/home
 #      pyyaml==5.4.1 \
 # Currently using the one from the distro archives (apt-get)
 
-RUN pip3 install \
-      django==4.0.2 \
-      djangorestframework==3.13.1 \
-      markdown==3.3.6 \
-      django-filter==21.1 \
+RUN mkdir -p /venv
+RUN python3 -mvenv /venv
+ENV PATH=/venv/bin:$PATH
+
+RUN source /venv/bin/activate && \
+    pip install \
+      django==5.2.9 \
+      djangorestframework==3.16.1 \
+      markdown==3.10 \
+      django-filter==25.2 \
       speclite \
       iniparse \
       astropy && \
@@ -42,7 +53,8 @@ RUN pip3 install \
 
 # Install HARP
 
-RUN curl -L https://github.com/tskisner/HARP/releases/download/v1.0.5/harp-1.0.5.tar.bz2 -O && \
+RUN source /venv/bin/activate && \
+    curl -L https://github.com/tskisner/HARP/releases/download/v1.0.5/harp-1.0.5.tar.bz2 -O && \
     tar --no-same-owner -xpf harp-1.0.5.tar.bz2 && \
     cd harp-1.0.5 && \
     ./configure --disable-python --disable-mpi && \
@@ -51,43 +63,22 @@ RUN curl -L https://github.com/tskisner/HARP/releases/download/v1.0.5/harp-1.0.5
     cd .. && \
     rm -rf harp-1.0.5 harp-1.0.5.tar.bz2
 
-# Install desispec
+# Install desi stuff
 
-RUN git clone https://github.com/desihub/desiutil && \
-    cd desiutil && \
-    git checkout 3.2.5 && \
-    python setup.py clean && \
-    python setup.py install && \
-    cd .. && \
-    rm -rf desiutil
+RUN source /venv/bin/activate && \
+    pip install \
+       desiutil==3.6.0 \
+       desitarget==4.4.0 \
+       desispec==0.70.0 \
+       desimodel==0.20.0 \
+    && rm -rf /tmp/home/.cacahe/pip
+       
+# I can't figure out the pypi archive for specter.  (I'm not sure I even need this...)
 
-RUN git clone https://github.com/desihub/desitarget && \
-    cd desitarget && \
-    git checkout 2.4.0 && \
-    python setup.py clean && \
-    python setup.py install && \
-    cd .. && \
-    rm -rf desitarget
-
-RUN git clone https://github.com/desihub/desispec && \
-    cd desispec && \
-    git checkout 0.51.11 && \
-    python setup.py clean && \
-    python setup.py install && \
-    cd .. && \
-    rm -rf desispec
-
-RUN git clone https://github.com/desihub/desimodel && \
-    cd desimodel && \
-    git checkout 0.17.0 && \
-    python setup.py clean && \
-    python setup.py install && \
-    cd .. && \
-    rm -rf desimodel
-
-RUN git clone https://github.com/desihub/specter && \
+RUN source /venv/bin/activate && \
+    git clone https://github.com/desihub/specter && \
     cd specter && \
-    git checkout 0.10.0 && \
+    git checkout 0.11.0 && \
     python setup.py clean && \
     python setup.py install && \
     cd .. && \
@@ -117,7 +108,7 @@ RUN mkdir /django
 RUN chown $UID:$GID /django
 
 RUN mkdir /home/user
-ENV HOME /home/user
+ENV HOME=/home/user
 WORKDIR /home/user
 RUN chown $UID:$GID /home/user
 RUN mkdir /home/user/.astropy
@@ -141,5 +132,8 @@ RUN python -c "import astropy.io.fits"
 COPY update_daily.sh /home/user/update_daily.sh
 
 RUN apachectl start
+
+# Some basic sanity stuff for shell access
+ENV LESS=-XLRi
 
 CMD [ "apachectl", "-D", "FOREGROUND", "-D", "APACHE_CONFDIR=/etc/apache2" ]

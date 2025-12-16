@@ -1,44 +1,98 @@
-# rknop/postgres-q3c
-FROM rknop/devuan-chimaera-rknop
-MAINTAINER Rob Knop <raknop@lbl.gov>
+#
+# docker build --target postgres -t registry.nersc.gov/desi/rknop/desidb-postgres:20251212c -f Dockerfile.postgres . 
 
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get upgrade -y && apt-get clean
-RUN apt-get install -y postgresql-13 postgresql-client-13 postgresql-13-postgis && apt-get clean
+FROM debian:bookworm-20250630 AS base
+LABEL maintainer="Rob Knop <raknop@lbl.gov>"
 
-RUN mkdir /secrets
-RUN echo "replace_this" >> /secrets/postgres_password
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
+      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
+      libzstd1 liblz4-1 \
+      tmux emacs-nox less procps \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /var/lib/postgresql/data \
+  && chmod 700 /var/lib/postgresql/data \
+  && chown postgres:postgres /var/lib/postgresql/data
+
+RUN cat /etc/locale.gen | perl -pe 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' > /etc/locale.gen.new \
+    && mv /etc/locale.gen.new /etc/locale.gen
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+
+ENV LESS=-XLRi
+
+# ======================================================================
+FROM base AS build
 
 RUN mkdir /build
 WORKDIR /build
-RUN apt-get -y install git make gcc postgresql-server-dev-13 libssl-dev libreadline-dev zlib1g-dev && \
-  git clone https://github.com/segasai/q3c.git && \
-  cd q3c && \
-  make && \
-  make install && \
-  cd .. && \
-  rm -rf q3c && \
-  apt-get purge -y git make gcc postgresql-server-dev-13 libssl-dev libreadline-dev zlib1g-dev && \
-  apt-get -y --purge autoremove && \
-  apt-get clean
 
-RUN mkdir /var/lib/postgresql/data \
-    && chmod 700 /var/lib/postgresql/data \
-    && chown postgres:postgres /var/lib/postgresql/data
+RUN apt-get update \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
+      make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
+      postgresql-server-dev-15 ca-certificates pkg-config
 
-RUN locale-gen en_US.utf8
+RUN git clone https://github.com/segasai/q3c.git
+RUN cd q3c \
+  && make \
+  && make install
 
-RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/13/main/pg_hba.conf
-RUN echo "listen_addresses='*'" >> /etc/postgresql/13/main/postgresql.conf
-RUN cat /etc/postgresql/13/main/postgresql.conf | \
-       perl -pe "s{data_directory *= *'(.*)'(.*)}{data_directory = '/var/lib/postgresql/data'\2}" \
-         > /etc/postgresql/13/main/postgresql.conf.new \
-    && mv /etc/postgresql/13/main/postgresql.conf /etc/postgresql/13/main/postgresql.conf.old \
-    && mv /etc/postgresql/13/main/postgresql.conf.new /etc/postgresql/13/main/postgresql.conf
+RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL15_1_5_1.tar.gz \
+         -o pg_hint_plan-REL15_1_5_1.tar.gz \
+  && tar -xpf pg_hint_plan-REL15_1_5_1.tar.gz \
+  && cd pg_hint_plan-REL15_1_5_1 \
+  && make \
+  && make install
+
+RUN chown postgres -R /usr/share/postgresql/ \
+  && chown postgres -R /usr/lib/postgresql
+
+# ======================================================================
+FROM base AS configure-postgres
+
+RUN echo "host all all 10.42.0.0/16 scram-sha-256" >> /etc/postgresql/15/main/pg_hba.conf
+RUN echo "host all all 128.55.0.0/16 scram-sha-256" >> /etc/postgresql/15/main/pg_hba.conf
+COPY postgresql.conf /etc/postgresql/15/main/postgresql.conf
+ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
+
+# ======================================================================
+FROM configure-postgres AS postgres
+
+COPY --from=build /usr/lib/postgresql/15/lib/q3c.so /usr/lib/postgresql/15/lib/q3c.so
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c.index.bc /usr/share/postgresql/lib/bitcode/q3c.index.bc
+COPY --from=build /usr/share/postgresql/15/extension/q3c* /usr/share/postgresql/15/extension/
+COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/15/lib/pg_hint_plan.so
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
+COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
 
 # Make sure this matches what is in the config file (created just above)
-ADD run_postgres.sh /run_postgres.sh
+# (There is some futzing about here to make sure the right permissions are
+# on the file regardless of the permissions as it exists on the machine
+# where the docker image is built.  I don't know why a simple ADD
+# followed by CHMOD didn't work.)
+COPY run_postgres.sh /tmp/run_postgres.sh
+RUN cp /tmp/run_postgres.sh /run_postgres.sh && chmod 755 /run_postgres.sh
 
 USER postgres
-ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
 CMD ["bash", "/run_postgres.sh"]
+
+# ======================================================================
+
+FROM configure-postgres AS pgdump
+
+RUN mkdir=/home/pgdump
+ENV HOME=/home/pgdump
+ADD run_pgdump.sh /home/pgdump/run_pgdump.sh
+
+USER postgres
+ENTRYPOINT [ "/bin/bash", "/home/pgdump/run_pgdump.sh" ]
