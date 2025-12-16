@@ -1,0 +1,144 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: desidb
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: deployment-desidb-postgres
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        nersc.gov/collab_uids: "58102"
+        nersc.gov/gid: "58102"
+        nersc.gov/gids: 58102,96414
+        nersc.gov/roles: user
+        nersc.gov/uid: "95089"
+        nersc.gov/username: raknop
+      labels:
+        workload.user.cattle.io/workloadselector: deployment-desidb-postgres
+    spec:
+      affinity: {}
+      containers:
+      - env:
+        - name: POSTGRES_DATA_DIR
+          value: /var/lib/postgresql/data
+        image: registry.nersc.gov/desi/rknop/desidb-postgres:20251212c
+        imagePullPolicy: IfNotPresent
+        name: postgres
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
+        stdin: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        tty: true
+        # Uncomment this next one to not actually run postgres
+        # command: [ "tail", "-f", "/etc/issue" ]
+        volumeMounts:
+        - name: postgres
+          mountPath: /var/lib/postgresql/data
+        - name: dshm
+          mountPath: /dev/shm
+        - name: desidb-secrets
+          mountPath: /secrets
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+        - name: registry-nersc
+      # Strictly speaking, I think this next initContainers block only
+      #   needs to run once for a given pvc
+      # initContainers:
+      # - name: volume-mount-hack
+      #   image: busybox
+      #   imagePullPolicy: Always
+      #   resources: {}
+      #   securityContext:
+      #     allowPrivilegeEscalation: false
+      #   terminationMessagePath: /dev/termination-log
+      #   terminationMessagePolicy: File
+      #   command: [ "sh", "-c", "chown 100:108 /pgdata && chmod 0750 /pgdata" ]
+      #   volumeMounts:
+      #   - name: postgres
+      #     mountPath: /pgdata
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: postgres
+        persistentVolumeClaim:
+          claimName: desidb-postgres-20251212
+      - emptyDir:
+          medium: Memory
+          sizeLimit: 128Gi
+        name: dshm
+      - name: desidb-secrets
+        secret:
+          defaultMode: 438
+          optional: false
+          secretName: desidb-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: desidb
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  ports:
+  - name: default
+    port: 42
+    protocol: TCP
+    targetPort: 42
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-desidb-postgres
+  sessionAffinity: None
+  type: ClusterIP
+---
+# Automatically creates DNS postgres-loadbalancer.desidb.production.svc.spin.nersc.org
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-loadbalancer
+  namespace: desidb
+spec:
+  allocateLoadBalancerNodePorts: true
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Local
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: postgresql
+    nodePort: 32012
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-desidb-postgres
+  sessionAffinity: None
+  type: LoadBalancer

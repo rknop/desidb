@@ -36,6 +36,10 @@ INSTALLED_APPS = [
     'fuji.apps.FujiConfig',
     'guadalupe.apps.GuadalupeConfig',
     'daily.apps.DailyConfig',
+    'himalayas.apps.HimalayasConfig',
+    'iron.apps.IronConfig',
+    'jura.apps.JuraConfig',
+    'loa.apps.LoaConfig',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -87,7 +91,11 @@ DATABASES = {
         'NAME': os.getenv( 'POSTGRES_NAME' ),
         'USER': os.getenv( 'POSTGRES_USER' ),
         'PASSWORD': passwd,
-        'HOST': 'decatdb.lbl.gov',
+        # 'HOST': '128.3.71.86', # 'decatdb.lbl.gov',  # Keep getting DNS failures
+        # 'HOST': 'desidb-rr.lbl.gov',
+        # 'HOST': 'postgres-loadbalancer.desidb.production.svc.spin.nersc.org'
+        # Should be able to connect on the k8 private network!
+        'HOST': 'postgres',
         'PORT': '5432',
     }
 }

@@ -13,6 +13,9 @@ class TilesRedshifts(db.models.CumulativeTilesRedshifts):
 
     cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
 
+    # Column added in early 2024-06
+    fitmethod = models.CharField( max_length=4, null=True )
+
     class Meta(db.models.CumulativeTilesRedshifts.Meta):
         db_table = 'daily"."tiles_redshifts'
 
@@ -20,6 +23,17 @@ class TilesRedshifts(db.models.CumulativeTilesRedshifts):
 class TilesFibermap(db.models.CumulativeTilesFibermap):
 
     cumultile = models.ForeignKey( CumulativeTiles, on_delete=models.CASCADE )
+
+    # Columns were added somewhere around 2023-06-08
+    firstnight = models.IntegerField( null=True )
+    lastnight = models.IntegerField( null=True )
+    min_mjd = models.FloatField( null=True )
+    mean_mjd = models.FloatField( null=True )
+    max_mjd = models.FloatField( null=True )
+
+    # Columns added in 2024-02
+
+    desiname = models.CharField( max_length=22, null=True )
 
     class Meta(db.models.CumulativeTilesFibermap.Meta):
         db_table = 'daily"."tiles_fibermap'

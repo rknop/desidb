@@ -1,0 +1,156 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    workload.user.cattle.io/workloadselector: deployment-desidb-desidb
+  name: desidb
+  namespace: desidb
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: deployment-desidb-desidb
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        workload.user.cattle.io/workloadselector: deployment-desidb-desidb
+    spec:
+      containers:
+      - env:
+        - name: POSTGRES_NAME
+          value: desidb
+        - name: POSTGRES_PASSWORD_FILE
+          value: /secrets/pgpasswd
+        - name: POSTGRES_USER
+          value: postgres
+        image: registry.nersc.gov/desi/rknop/desidb-django:20251212
+        imagePullPolicy: Always
+        name: desidb
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            add:
+            - NET_BIND_SERVICE
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 95089
+        stdin: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        tty: true
+        # Uncomment this next one to not actually run django
+        # command: [ "tail", "-f", "/etc/issue" ]
+        volumeMounts:
+        - mountPath: /django
+          name: django-webap
+        - mountPath: /secrets
+          name: desidb-secrets
+        - mountPath: /data
+          name: desi-data
+          readOnly: true
+        - mountPath: /targets
+          name: desi-targets
+          readOnly: true
+#         - mountPath: /dr1
+#           name: desi-dr1
+#           readOnly: true
+      dnsConfig: {}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 58102
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - hostPath:
+          path: /global/cfs/cdirs/desi/users/raknop/desidb/django
+          type: Directory
+        name: django-webap
+      - name: desidb-secrets
+        secret:
+          defaultMode: 256
+          optional: false
+          secretName: desidb-secrets
+      - hostPath:
+          path: /global/cfs/cdirs/desi/spectro/redux
+          type: Directory
+        name: desi-data
+      - hostPath:
+          path: /global/cfs/cdirs/desi/target
+          type: Directory
+        name: desi-targets
+#       - hostPath:
+#           path: /global/cfs/cdirs/desi/public/dr1/spectro/redux
+#           type: Directory
+#         name: desi-dr1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: desidb
+  namespace: desidb
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: default
+    port: 42
+    protocol: TCP
+    targetPort: 42
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-desidb-desidb
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: desidb-ingress
+  namespace: desidb
+  ownerReferences:
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-desidb-desidb
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: desidb
+  namespace: desidb
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 500m
+spec:
+  rules:
+  - host: desidb.desidb.production.svc.spin.nersc.org
+    http:
+      paths:
+      - backend:
+          service:
+            name: desidb-ingress
+            port:
+              number: 8080
+        pathType: ImplementationSpecific
