@@ -31,7 +31,7 @@ spec:
           value: /secrets/pgpasswd
         - name: POSTGRES_USER
           value: postgres
-        image: registry.nersc.gov/desi/rknop/desidb-django:20251212
+        image: registry.nersc.gov/desi/rknop/desidb-django:20251216
         imagePullPolicy: Always
         name: desidb
         resources: {}
@@ -50,8 +50,8 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         tty: true
-        # Uncomment this next one to not actually run django
-        # command: [ "tail", "-f", "/etc/issue" ]
+        # Uncomment this next one to not actually run apache
+        command: [ "tail", "-f", "/etc/issue" ]
         volumeMounts:
         - mountPath: /django
           name: django-webap
@@ -69,6 +69,8 @@ spec:
       dnsConfig: {}
       dnsPolicy: ClusterFirst
       restartPolicy: Always
+      imagePullSecrets:
+        - name: registry-nersc
       schedulerName: default-scheduler
       securityContext:
         fsGroup: 58102
@@ -84,7 +86,7 @@ spec:
           optional: false
           secretName: desidb-secrets
       - hostPath:
-          path: /global/cfs/cdirs/desi/spectro/redux
+          path: /global/cfs/cdirs/desi
           type: Directory
         name: desi-data
       - hostPath:
