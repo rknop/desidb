@@ -87,6 +87,11 @@ USER postgres
 CMD ["bash", "/run_postgres.sh"]
 
 # ======================================================================
+FROM postgres AS postgres-test
+
+RUN echo "host all all 0.0.0.0/0 scram-sha-256" >> /etc/postgresql/15/main/pg_hba.conf
+
+# ======================================================================
 
 FROM configure-postgres AS pgdump
 

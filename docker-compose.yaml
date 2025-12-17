@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: registry.nersc.gov/desi/rknop/desidb-postgres:20251217
+    build:
+      context: .
+      target: postgres-test
+      dockerfile: Dockerfile.postgres
+    environment:
+      POSTGRES_DATA_DIR: /var/lib/postgresql/data
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: secrets
+        target: /secrets
+        read_only: true
+    healthcheck:
+      test: netcat -w 1 localhost 5432 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  shell:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    image: registry.nersc.gov/desi/rknop/desidb-shell:20251217
+    build:
+      context: .
+      target: shell
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_NAME: desidb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /secrets/pgpasswd
+    volumes:
+      - type: bind
+        source: secrets
+        target: /secrets
+        read_only: true
+      - type: bind
+        source: $PWD
+        target: /tmp/home
+
+volumes:
+  postgres_data:

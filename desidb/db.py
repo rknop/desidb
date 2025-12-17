@@ -15,16 +15,7 @@ import numpy as np
 import psycopg
 from psycopg import sql
 
-logger = logging.getLogger( "main" )
-if not logger.hasHandlers():
-    _logout = logging.StreamHandler( sys.stderr )
-    logger.addHandler( _logout )
-    _formatter = logging.Formatter( f'[%(asctime)s - %(levelname)s] - %(message)s',
-                                    datefmt='%Y-%m-%d %H:%M:%S' )
-    _logout.setFormatter( _formatter )
-logger.propagate = False
-logger.setLevel( logging.INFO )
-
+from desidb.logger import DBLogger
 
 _echoqueries = True
 _alwaysexplain = False
@@ -57,7 +48,7 @@ def get_connect_info():
     dbname = os.getenv( 'POSTGRES_NAME', default='desidb' )
     dbuser = os.getenv( 'POSTGRES_USER', default='postgres' )
     dbpasswdfile = os.getenv( 'POSTGRES_PASSWORD_FILE', default='/secrets/pgpasswd' )
-    with open( dbpasswd ) as ifp:
+    with open( dbpasswdfile ) as ifp:
         dbpasswd = ifp.readline().strip()
 
     return dbhost, dbport, dbname, dbuser, dbpasswd
@@ -196,8 +187,8 @@ class DBCon:
         else:
             self.con_is_mine = True
             self.con = get_dbcon()
-            self.echoqueries = cfg.value( 'system.db.echoqueries' )
-            self.alwaysexplain = cfg.value( 'system.db.alwaysexplain' )
+            self.echoqueries = _echoqueries
+            self.alwaysexplain = _alwaysexplain
             self.dictcursor = bool( dictcursor )
             self.cursorisdict = bool( dictcursor )
 
@@ -280,18 +271,16 @@ class DBCon:
         Parameters are the same as in execute()
 
         """
-        global logger
-
         if self.echoqueries and not silent:
             qprint = q.as_string() if isinstance( q, sql.Composable ) else q
-            logger.debug( f"Sending query\n{qprint}\nwith substitutions: {subdict}" )
+            DBLogger.debug( f"Sending query\n{qprint}\nwith substitutions: {subdict}" )
 
         if self.alwaysexplain and not silent:
             self.cursor.execute( f"EXPLAIN {q}", subdict )
             rows = self.cursor.fetchall()
             dex = 'QUERY PLAN' if self.curcursorisdict else 0
             nl = '\n'
-            logger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+            DBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
         self.cursor.execute( q, subdict )
 
@@ -509,6 +498,7 @@ class DBBase:
     All subclasses must include:
 
     __tablename__ = "<name of table in database>"
+    __tableschema__ = "<schema in which table exists>"  (Usually this is "public")
     _tablemeta = None
     _pk = <list>
 
@@ -552,8 +542,8 @@ class DBBase:
                                 "        'TABLE', c.dtd_identifier) "
                                 "      =(e.object_catalog, e.object_schema, e.object_name, "
                                 "        e.object_type, e.collection_type_identifier) ) "
-                                "WHERE table_name=%(table)s",
-                                { 'table': cls.__tablename__ } )
+                                "WHERE table_name=%(table)s AND table_schema=%(schema)s",
+                                { 'table': cls.__tablename__, 'schema': cls.__tableschema__ } )
 
             cls._tablemeta = { c['column_name']: ColumnMeta(**c) for c in cols }
 
@@ -771,7 +761,7 @@ class DBBase:
         """Get an object from a table row with the specified primary key(s)."""
 
         q, subdict = cls._construct_pk_query_where( *args )
-        q = f"SELECT * FROM {cls.__tablename__} {q}"
+        q = f"SELECT * FROM {cls.__tableschema__}.{cls.__tablename__} {q}"
         with DBCon( dbcon, dictcursor=False ) as con:
             rows, cols = con.execute( q, subdict )
 
@@ -829,12 +819,13 @@ class DBBase:
         onlist = ""
         for subdex, ( pk, pktyp ) in enumerate( zip( cls._pk, pktypes ) ):
             collist += f"{comma}{pk}"
-            onlist += f"{_and} t.{pk}={cls.__tablename__}.{pk} "
+            onlist += f"{_and} t.{pk}={cls.__tableschema__}.{cls.__tablename__}.{pk} "
             _and = "AND"
             comma = ","
 
         with DBCon( dbcon, dictcursor=False ) as con:
-            q = f"SELECT * FROM {cls.__tablename__} JOIN (VALUES {mess}) AS t({collist}) ON {onlist} "
+            q = ( f"SELECT * FROM {cls.__tableschema__}.{cls.__tablename__} "
+                  f"JOIN (VALUES {mess}) AS t({collist}) ON {onlist} " )
             rows, cols = con.execute( q, subdict )
 
         objs = []
@@ -852,7 +843,7 @@ class DBBase:
 
         # WORRY : when we edit attrs below, will that also affect anything outside
         #   this function?  E.g. if it's called with a ** itself.
-        q = f"SELECT * FROM {cls.__tablename__} WHERE "
+        q = f"SELECT * FROM {cls.__tableschema__}.{cls.__tablename__} WHERE "
         _and = ""
         for k in attrs.keys():
             attrs[k] = cls._tablemeta[k].py_to_pg( attrs[k] )
@@ -872,7 +863,7 @@ class DBBase:
 
     def refresh( self, dbcon=None ):
         q, subdict = self._construct_pk_query_where( *self.pks )
-        q = f"SELECT * FROM {self.__tablename__} {q}"
+        q = f"SELECT * FROM {self.__tableschema__}.{self.__tablename__} {q}"
 
         with DBCon( dbcon, dictcursor=False ) as con:
             rows, cols = con.execute( q, subdict )
@@ -892,7 +883,7 @@ class DBBase:
 
         subdict = self._build_subdict( dbcon=dbcon )
 
-        q = ( f"INSERT INTO {self.__tablename__}({','.join(subdict.keys())}) "
+        q = ( f"INSERT INTO {self.__tableschema__}.{self.__tablename__}({','.join(subdict.keys())}) "
               f"VALUES ({','.join( [ f'%({c})s' for c in subdict.keys() ] )})" )
 
         with DBCon( dbcon, dictcursor=False ) as con:
@@ -904,7 +895,7 @@ class DBBase:
 
     def delete_from_db( self, dbcon=None, nocommit=False ):
         where, subdict = self._construct_pk_query_where( me=self )
-        q = f"DELETE FROM {self.__tablename__} {where}"
+        q = f"DELETE FROM {self.__tableschema__}.{self.__tablename__} {where}"
         with DBCon( dbcon, dictcursor=False ) as con:
             con.execute( q, subdict )
             con.commit()
@@ -915,7 +906,7 @@ class DBBase:
             raise RuntimeError( "Can't refresh with nocommit" )
 
         subdict = self._build_subdict( dbcon=dbcon )
-        q = ( f"UPDATE {self.__tablename__} SET "
+        q = ( f"UPDATE {self.__tableschema__}.{self.__tablename__} SET "
               f"{','.join( [ f'{c}=%({c})s' for c in subdict.keys() if c not in self._pk ] )} " )
         where, wheresubdict = self._construct_pk_query_where( me=self )
         subdict.update( wheresubdict )
@@ -950,7 +941,7 @@ class DBBase:
              the values in dict.  (SQL will have ON CONFLICT DO NOTHING
              if False, ON CONFLICT DO UPDATE if True.)
 
-          assume_no_conflict: bool, default Falsea
+          assume_no_conflict: bool, default False
              Usually you just want to leave this False.  There are
              obscure kludge cases (e.g. if you're playing games and have
              removed primary key constraints and you know what you're
@@ -1007,7 +998,7 @@ class DBBase:
 
         with DBCon( dbcon, dictcursor=False ) as con:
             con.execute( "DROP TABLE IF EXISTS temp_bulk_upsert" )
-            con.execute( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
+            con.execute( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tableschema__}.{cls.__tablename__})" )
             with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:
                     copier.write_row( v )
@@ -1021,7 +1012,7 @@ class DBBase:
             else:
                 conflict = ""
 
-            q = f"INSERT INTO {cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
+            q = f"INSERT INTO {cls.__tableschema__}.{cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
 
             if nocommit:
                 return q
@@ -1035,90 +1026,66 @@ class DBBase:
 
 # ======================================================================
 
-class AuthUser( DBBase ):
-    __tablename__ = "authuser"
-    _tablemeta = None
-    _pk = [ 'id' ]
-
-    def __init__( self, *args, **kwargs ):
-        super().__init__( *args, **kwargs )
-
-
-# ======================================================================
-
-class PasswordLink( DBBase ):
-    __tablename__ = "passwordlink"
+class General_TargetFiles( DBBase ):
+    __tablename__ = "targetfiles"
+    __tableschema__ = "general"
     _tablemeta = None
     _pk = [ 'id' ]
 
 
-# ======================================================================
+class General_MainTargets( DBBase ):
+    __tablename__ = "maintargets"
+    __tableschema__ = "general"
+    _tablemeta = None
+    _pk= [ 'id' ]
 
-class Provenance( DBBase ):
-    __tablename__ = "provenance"
+
+class General_SV3Targets( DBBase ):
+    __tablename__ = "sv3targets"
+    __tableschema__ = "general"
     _tablemeta = None
     _pk = [ 'id' ]
 
 
-# ======================================================================
+class Static_FP( DBBase ):
+    __tablename__ = "fp"
+    __tableschema__ = "static"
+    _tablemeta = None
+    _pk = [ 'objid', 'brickid' ]
 
-class DiaObject( DBBase ):
-    __tablename__ = "diaobject"
+
+class Static_MostHosts( DBBase ):
+    __tablename__ = "mosthosts"
+    __tableschema__ = "static"
     _tablemeta = None
     _pk = [ 'id' ]
 
 
-# ======================================================================
-
-class DiaObjectPosition( DBBase ):
-    __tablename__ = "diaobject_position"
+class Static_MTL( DBBase ):
+    __tablename__ = "mtl"
+    __tableschema__ = "static"
     _tablemeta = None
     _pk = [ 'id' ]
 
 
-# ======================================================================
+class Static_PV( DBBase ):
+    __tablename__ = "pv"
+    __tableschema__ = "static"
+    _tablemeta = None
+    _pk = [ 'objid', 'brickid' ]
 
-class L2Image( DBBase ):
-    __tablename__ = "l2image"
+
+class Static_Secondary( DBBase ):
+    __tablename__ = "secondary"
+    __tableschema__ = "static"
     _tablemeta = None
     _pk = [ 'id' ]
 
 
-# ======================================================================
-
-class SummedImage( DBBase ):
-    __tablename__ = "summed_image"
+class Static_SGA( DBBase ):
+    __tablename__ = "sga"
+    __tableschema__ = "static"
     _tablemeta = None
-    _pk = [ 'id' ]
+    _pk = [ 'sga_id' ]
 
 
-# ======================================================================
-
-class SegMap( DBBase ):
-    __tablename__ = "segmap"
-    _tablemeta = None
-    _pk = [ 'id' ]
-
-
-# ======================================================================
-
-class Lightcurve( DBBase ):
-    __tablename__ = "lightcurve"
-    _tablemeta = None
-    _pk = [ 'id' ]
-
-
-# ======================================================================
-
-class Spectrum1d( DBBase ):
-    __tablename__ = "spectrum1d"
-    _tablemeta = None
-    _pk = [ 'id' ]
-
-
-# ======================================================================
-
-# class DiaObjectClassification( DBBase ):
-#     __tablename__ = "diaobject_classification"
-#     _tablemeta = None
-#     _pk = [ 'id' ]
