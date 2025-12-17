@@ -1,0 +1,105 @@
+MANUAL SCHEMA CREATION
+
+I haven't figured out how to tell Django that these exist, so for now we
+have to do manual migrations to create new schema.  To do this, in /django/desidb:
+
+  python manage.py makemigrations everest --empty
+
+replacing everest with the appropriate django ap.  That will create a
+file in everest/migrations.  Edit that file to have:
+
+    operations = [
+       migrations.RunSQL(
+         sql = ( f"DO $do$ "
+                 f"BEGIN "
+                 f"  IF NOT EXISTS ( "
+                 f"     SELECT FROM pg_catalog.pg_roles WHERE rolname='desi' "
+                 f"  ) THEN "
+                 f"     CREATE ROLE desi PASSWORD '{os.getenv('DESIPASSWORD')}' LOGIN; "
+                 f"  END IF; "
+                 f"END "
+                 f"$do$;" ),
+         reverse_sql = ""
+       )
+       migrations.RunSQL( 
+         sql = 'CREATE SCHEMA IF NOT EXISTS everest',
+         reverse_sql = 'DROP SCHEMA IF EXISTS everest'
+       ),
+       migrations.RunSQL(
+         sql = 'GRANT USAGE ON SCHEMA everest TO desi',
+         reverse_sql = 'REVOKE USAGE ON SCHEMA everest FROM desi'
+       )
+       migrations.RunSQL(
+         sql = ( 'ALTER DEFAULT PRIVILEGES IN SCHEMA everest '
+                 'GRANT SELECT ON TABLES TO desi' )
+         reverse_sql = ( 'ALTER DEFAULT PRIVILEGES IN SCHEMA everest '
+                         'REVOKE SELECT ON TABLES FROM desi' )
+      )
+    ]
+
+or whatever SQL you really need.  (Remember to add 'import os' at the
+top.)  (For schema creation, only include the user creation in the *very*
+first one.  Change everest, of course, to whatever the schema is.)
+
+
+======================================================================
+
+NEW DATA RELEASE
+
+* Add a django ap for the release; on the desidb spin instance, run:
+
+    python manage.py startapp <releasename>
+
+* Copy and properly edit (proofread several times to get everything, or
+  you will muck up an older release!) the code from another release:
+
+    desidb/<releasename>/models.py
+    desidb/<releasename>/management/commands/load<release>.py
+
+* Edit desidb/desidb/settings.py and add the new application to
+  INSTALLED_APPS; follow the pattern of the previously existing releases.
+
+* Create an "initial" manual database migration; this is necessary to
+  create the postgresql schema, something that django doesn't natively
+  know about.
+
+    python manage.py makemigrations iron --name initial --empty
+
+  Edit that file and copy the text from the 0001_initial.py of another
+  release, replacing the release name as appropriate.  (Again, be
+  careful and proofread multiple times to avoid corrupting something
+  else.  If I'm not mistaken, the release name shows up 6 times.)
+
+* Apply the initial database migration
+
+    python manage.py migrate
+
+* Make the database migration that creates the table for the new release
+
+    python manage.py makemigrations <release>
+
+  (Ideally, you can leave off the <release> at the end, as the only app
+  with changes will be the new release you're making.)
+
+* Apply the migrations
+
+    python manage.py migrate
+
+* Load the release.  IMPORTANT: run this in a tmux session.  Otherwise,
+  the spin shell timeout may cancel your load before it finishes.
+
+    nohup python manage.py load<release> -n 19900101 -v 3 2>&1 | tee
+    load<release>.out
+    
+  This takes a long time (more than a day).
+
+======================================================================
+
+USERS
+
+There aren't built-in schema files for creating the users.  I did this
+manually.
+
+  python manage.py createsuperuser --username=admin --email=raknop@lbl.gov
+  
+I then manually added the "desi" user with the standard desi password.
