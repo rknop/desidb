@@ -31,6 +31,8 @@ spec:
           value: /secrets/pgpasswd
         - name: POSTGRES_USER
           value: postgres
+        - name: PYTHONPATH
+          value: /desidb
         image: registry.nersc.gov/desi/rknop/desidb-shell:20251218
         imagePullPolicy: Always
         name: desidb

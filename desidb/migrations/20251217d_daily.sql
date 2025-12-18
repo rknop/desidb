@@ -10,6 +10,10 @@ CREATE TABLE daily.cumulative_tiles(
   filename  text NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX unique_tile ON daily.cumulative_tiles( tileid, petal, night );
+CREATE INDEX idx_cumutile_tileid ON daily.cumulative_tiles( tileid );
+CREATE INDEX idx_cumutile_petal ON daily.cumulative_tiles( petal );
+CREATE INDEX idx_cumutile_night ON daily.cumulative_tiles( night );
+CREATE INDEX idx_cumutile_filename ON daily.cumulative_tiles( filename );
 
 
 CREATE TABLE daily.tiles_redshifts(
@@ -18,16 +22,7 @@ CREATE TABLE daily.tiles_redshifts(
   zerr         double precision,
   zwarn        bigint,
   chi2         double precision,
-  coeff_0      double precision,
-  coeff_1      double precision,
-  coeff_2      double precision,
-  coeff_3      double precision,
-  coeff_4      double precision,
-  coeff_5      double precision,
-  coeff_6      double precision,
-  coeff_7      double precision,
-  coeff_8      double precision,
-  coeff_9      double precision,
+  coeff        double precision[10],
   fitmethod    varchar[4],
   npixels      bigint,
   spectype     varchar[6],
@@ -107,6 +102,10 @@ CREATE TABLE daily.tiles_fibermap(
  bgs_target                  bigint,
  mws_target                  bigint,
  scnd_target                 bigint,
+ sv3_bgs_target              bigint,
+ sv3_mws_target              bigint,
+ sv3_desi_target             bigint,
+ sv3_scnd_target             bigint,
  plate_ra                    double precision,
  plate_dec                   double precision,
  tileid                      integer,
@@ -116,7 +115,7 @@ CREATE TABLE daily.tiles_fibermap(
  coadd_numtile               smallint,
  mean_delta_x                real,
  rms_delta_x                 real,
- mean_deltay_y               real,
+ mean_delta_y                real,
  rms_delta_y                 real,
  mean_psf_to_fiber_specflux  real,
  mean_fiber_x                real,
@@ -214,6 +213,7 @@ CREATE TABLE daily.tiles_tsnr2(
   tsnr2_bgs           real,
   tsnr2_elg           real,
   tsnr2_gpbbackup     real,
+  tsnr2_gpbbright     real,
   tsnr2_gpbdark       real,
   tsnr2_lrg           real,
   tsnr2_lya           real,

@@ -224,8 +224,11 @@ class DESILoader:
 
     datematch = re.compile( r'^[0-9]{8}$' )
     numbersmatch = re.compile( r'^[0-9]+$' )
+    releaseverify = re.compile( r'^[a-z0-9_]+$' )
 
     def __init__( self, desi_release, donotload=False, noemail=False ):
+        if not self.releaseverify.search( desi_release ):
+            raise ValueError( f"Invalid release {desi_release}, must just be [a-z0-9_]+" )
         self.desi_release = desi_release
         self.desi_release_module = importlib.import_module( desi_release )
         self.basetiledir = pathlib.Path( f'/data/spectro/redux/{desi_release}/tiles/cumulative' )
@@ -240,12 +243,19 @@ class DESILoader:
         typematch = {
             'bool'  : [ 'boolean' ],
             'uint8' : [ 'smallint' ],
-            'float32' : [ 'real' ],
-            'float64' : [ 'double precision' ],
-            'int16' : [ 'smallint' ],
-            'int32' : [ 'integer' ],
-            'int64' : [ 'bigint' ],
-            'object' : [ ( 'ARRAY', 'character varying' ) ]
+            '>f4' : [ 'real' ],
+            '>f8' : [ 'double precision' ],
+            '>i2' : [ 'smallint' ],
+            '>i4' : [ 'integer' ],
+            '>i8' : [ 'bigint' ],
+            '<U1' : [ 'character varying' ],
+            '<U2' : [ 'character varying' ],
+            '<U3' : [ 'character varying' ],
+            '<U4' : [ 'character varying' ],
+            '<U6' : [ 'character varying' ],
+            '<U8' : [ 'character varying' ],
+            '<U20' : [ 'character varying' ],
+            '<U22' : [ 'text' ]
         }
 
         bintables = {}
@@ -326,6 +336,10 @@ class DESILoader:
             # sys.stderr.write( f'Working on {modeltable}; ignore is {hdumap[modeltable]["ignore"]}\n' )
             for datacol in tab.columns:
                 datatype = str( tab[datacol].dtype )
+                if len( tab[datacol].shape) > 1:
+                    nelems = tab[datacol].shape[1]
+                else:
+                    nelems = None
                 if datatype not in typematch.keys():
                     raise RuntimeError( f"Unknown type for FITS column {datacol}: {datatype}" )
                 smm['datatypes'][datacol] = datatype
@@ -336,17 +350,18 @@ class DESILoader:
                     continue
 
                 if str(datacol).lower() not in model._tablemeta:
-                    smm['missingfromodel'].add( datacol )
+                    smm['indatabutshouldnotbe'].add( datacol )
                     schemaok = False
                     continue
 
-                pgtype = model._tablemeta[datacol]['data_type']
-                pgelemtype = model._tablemeta[datacol]['element_type']
+                pgtype = model._tablemeta[datacol.lower()]['data_type']
+                pgelemtype = model._tablemeta[datacol.lower()]['element_type']
 
                 ok = False
                 for possible_pgtype in typematch[ datatype ]:
-                    if isinstance( possible_pgtype, tuple ):
-                        if ( pgtype == possible_pgtype[0] ) and ( pgelemtype == possible_pgtype[1] ):
+                    if nelems is not None:
+                        if (pgtype == 'ARRAY' ) and ( pgelemtype == possible_pgtype ):
+                            # WORRY : verify length of array.  I don't see that in the Column Meta
                             ok = True
                             break
                     elif pgtype == possible_pgtype:
@@ -364,9 +379,9 @@ class DESILoader:
                 elemtype = model._tablemeta[field]['element_type']
 
                 if elemtype is not None:
-                    smm['modeltypes'][field.name] = pgtype
+                    smm['modeltypes'][field] = pgtype
                 else:
-                    smm['modeltypes'][field.name] = ( pgtype, elemtype )
+                    smm['modeltypes'][field] = ( pgtype, elemtype )
 
                 tabfield = str(field).upper()
 
@@ -434,9 +449,10 @@ class DESILoader:
             baseclass._load_table_meta( dbcon=dbcon )
 
             if not self.donotload:
-                res = dbcon.execute( f"SELECT * FROM {baseclass.__tableschema__}.{baseclass.__tablename__} "
-                                     f"WHERE tileid=%(tileid)s AND petal=%(petal)s AND night=%(night)s" )
-                if len(res) > 0:
+                rows, cols = dbcon.execute( f"SELECT * FROM {baseclass.__tableschema__}.{baseclass.__tablename__} "
+                                            f"WHERE tileid=%(tileid)s AND petal=%(petal)s AND night=%(night)s",
+                                            { 'tileid': tileid, 'petal': petal, 'night': night } )
+                if len(rows) > 0:
                     raise TopLevelEntryExistsError( f'Entry already exists: tile={tileid}, '
                                                     f'petal={petal}, night={night}' )
 
@@ -448,13 +464,13 @@ class DESILoader:
                 # this at once, I'm writing in a race condition here....
                 cumultile = baseclass( id=uuid.uuid4(), tileid=tileid, petal=petal, night=night,
                                        filename=relfilepath, dbcon=dbcon )
-                cumultile.insert( nocommit=True, refresh=False )
+                cumultile.insert( nocommit=True, refresh=False, dbcon=dbcon )
 
                 for modeltable in hdumap.keys():
                     model = getattr( self.desi_release_module, modeltable )
                     tab = bintables[ hdumap[modeltable]['hdu'] ]
 
-                    data = { str(col).lower(): list( tab['col'] ) for col in tab.columns }
+                    data = { str(col).lower(): list( tab[col] ) for col in tab.columns }
                     data['cumultile_id'] = [ cumultile.id ] * len(tab)
 
                     if hdumap[modeltable]['duplicates'] == 'update':
@@ -469,8 +485,10 @@ class DESILoader:
                         #  out you have to say upsert=False and assume_no_conflict=True.
                         assume_no_conflict = True
 
-                    model.bulk_insert_or_upsert( data, dbcon=dbcon, upsert=upsert,
-                                                 assume_no_conflict=assume_no_conflict, nocommit=True )
+                    q = model.bulk_insert_or_upsert( data, dbcon=dbcon, upsert=upsert,
+                                                     assume_no_conflict=assume_no_conflict, nocommit=True )
+                    dbcon.execute( q )
+                    dbcon.execute( "DROP TABLE temp_bulk_upsert" )
 
                 dbcon.commit()
 
@@ -503,9 +521,10 @@ class DESILoader:
             baseclass._load_table_meta( dbcon=dbcon )
 
             if not self.donotload:
-                res = dbcon.execute( f"SELECT * FROM {baseclass.__tableschema__}.{baseclass.__tablename__} "
-                                     f"WHERE healpix=%(healpix)s AND survey=%(survey)s AND program=%(program)s" )
-                if len(res) > 0:
+                rows, cols = dbcon.execute( f"SELECT * FROM {baseclass.__tableschema__}.{baseclass.__tablename__} "
+                                            f"WHERE healpix=%(healpix)s AND survey=%(survey)s AND program=%(program)s",
+                                            { 'healpix': healpix, 'survey': survey, 'program': program } )
+                if len(rows) > 0:
                     raise TopLevelEntryExistsError( f'Entry already exists: healpix={healpix}, '
                                                     f'survey={survey}, program={program}' )
 
@@ -514,13 +533,13 @@ class DESILoader:
             if not self.donotload:
                 healpixobj = baseclass( id=uuid.uuid4(), healpix=healpix, survey=survey, program=program,
                                         filename=relfilepath, dbcon=dbcon )
-                healpixobj.insert( nocommit=True, refresh=False )
+                healpixobj.insert( nocommit=True, refresh=False, dbcon=dbcon )
 
                 for modeltable in hdumap.keys():
                     model = getattr( self.desi_release_module, modeltable )
                     tab = bintables[ hdumap[modeltable]['hdu'] ]
 
-                    data = { str(col).lower(): list( tab['col'] ) for col in tab.columns }
+                    data = { str(col).lower(): list( tab[col] ) for col in tab.columns }
                     data['healpix_id'] = [ healpixobj.id ] * len(tab)
 
                     if hdumap[modeltable]['duplicates'] == 'update':
@@ -533,8 +552,10 @@ class DESILoader:
                         upsert = False
                         assume_no_conflict = True
 
-                    model.bulk_insert_or_upsert( data, dbcon=dbcon, upsert=upsert,
-                                                 assume_no_conflict=assume_no_conflict, nocommit=True )
+                    q = model.bulk_insert_or_upsert( data, dbcon=dbcon, upsert=upsert,
+                                                     assume_no_conflict=assume_no_conflict, nocommit=True )
+                    dbcon.execute( q )
+                    dbcon.execute( "DROP TABLE temp_bulk_upsert" )
 
                 dbcon.commit()
 
@@ -564,14 +585,14 @@ class DESILoader:
                     for col in smm['coltypemismatch']:
                         loginfo.append( f"...{col} datatype mismatch; "
                                         f"is {smm['datatypes'][col]} in the data, and "
-                                        f"{smm['modeltypes'][col]} in the model." )
+                                        f"{smm['modeltypes'][col.lower()]} in the model." )
         return loginfo
 
 
     # ======================================================================
 
     def print_schema_mismatch( self, data, loginfo=[], subject=None ):
-        loginfo = self._build_schema_mismatch_info( data, loginfo=loginfo )
+        loginfo = self.build_schema_mismatch_info( data, loginfo=loginfo )
         DBLogger.error( "\n".join( loginfo ) + "\n" )
         if ( self.emailto is not None ) and ( not self.noemail ):
             emailmsg = email.message.EmailMessage()
@@ -605,7 +626,7 @@ class DESILoader:
                                   f"night {night}, petal {petal}, skipping." )
                 continue
             DBLogger.info( f"Imported tile {tile:6d}, night {night}, petal {petal}" )
-            DBLogger.debug( "\n".join( self._build_schema_mismatch_info( data ) ) )
+            DBLogger.debug( "\n".join( self.build_schema_mismatch_info( data ) ) )
 
 
     # ======================================================================
@@ -619,7 +640,7 @@ class DESILoader:
                 DBLogger.warning( "Subdirectory {night.name} doesn't match yyyymmdd, skippng" )
             else:
                 nightge = 0 if nightge is None else int(nightge)
-                nightlt = 9999999 if nightlt is None else nightlt
+                nightlt = 99999999 if nightlt is None else nightlt
                 if ( int(night.name) < nightge ) or ( int(night.name) >= nightlt ):
                     continue
                 self.load_tile_night_directory( tile, int(night.name) )
@@ -629,7 +650,7 @@ class DESILoader:
 
     def load_all_tiles_newer_than( self, nightge, nightlt=None, onlytile=None ):
         if nightlt is None:
-            nightlt = 999999
+            nightlt = 99999999
         toload = []
         DBLogger.debug( "Going through all tile directories to find yyyymmdd subdirectories..." )
         for tiledir in self.basetiledir.iterdir():
@@ -739,8 +760,8 @@ def main():
     parser.add_argument( '-d', '--healpixd100', default=None, type=int,
                          help=( 'Healpix / 100 (e.g. 381 loads all healpix 38100 through 38199 ). '
                                 'requires --survey and --program; default: load all' ) )
-    parser.add_arguments( '-v', '--verbose', action='store_true', default=False,
-                          help="Show debug log info" )
+    parser.add_argument( '-v', '--verbose', action='store_true', default=False,
+                         help="Show debug log info" )
     parser.add_argument( '--verify-only', default=False, action='store_true',
                          help="Don't actually load, just verify that files work." )
     parser.add_argument( '--no-email', default=False, action='store_true',
@@ -760,11 +781,18 @@ def main():
     else:
         if args.auto_newer or ( args.tiles_newer is not None ):
             if args.tiles_newer is not None:
-                if args.options_newer:
+                if args.auto_newer:
                     raise ValueError( "Don't use --auto-newer and --tiles-newer togehter." )
                 startdate = int( args.tiles_newer )
             else:
-                raise NotImplementedError( "Rob, you need to implement this." )
+                with desidb.db.DBCon() as dbcon:
+                    # No Bobby Tables worry here because the DESILoader constructor made sure
+                    #   that desi_releas is [a-z0-9_]+
+                    rows, cols = dbcon.execute( f"SELECT MAX(night) FROM {loader.desi_release}.cumulative_tiles" )
+                    if rows[0][0] is None:
+                        startdate = 0
+                    else:
+                        startdate = rows[0][0]
             enddate = None if args.tiles_older is None else int( args.tiles_older )
             loader.load_all_tiles_newer_than( startdate, enddate )
 

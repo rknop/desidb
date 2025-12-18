@@ -89,7 +89,7 @@ spec:
       volumes:
       - name: postgres
         persistentVolumeClaim:
-          claimName: desidb-postgres-20251212
+          claimName: desidb-postgres-20251218
       - emptyDir:
           medium: Memory
           sizeLimit: 128Gi

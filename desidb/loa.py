@@ -26,7 +26,7 @@ class TilesExpFibermap( DBBase ):
     __tablename__ = "tiles_expfibermap"
     __tableschema__ = "loa"
     _tablemeta = None
-    _pk = [ 'cumultile_id', 'targetid', 'nibht', 'expid' ]
+    _pk = [ 'cumultile_id', 'targetid', 'night', 'expid' ]
 
 
 class TilesTSNR2( DBBase ):

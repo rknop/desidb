@@ -15,7 +15,7 @@ from psycopg import sql
 
 from desidb.logger import DBLogger
 
-_echoqueries = True
+_echoqueries = False
 _alwaysexplain = False
 
 
@@ -972,14 +972,26 @@ class DBBase:
         if len(data) == 0:
             return
 
+        def arrayify( val ):
+            if isinstance( val, (list, tuple) ):
+                return f"{{{','.join([str(e) for e in val])}}}"
+            elif isinstance( val, np.ndarray ):
+                if np.issubdtype( val.dtype, np.floating ):
+                    return f"{{{','.join([np.format_float_scientific(e, unique=True) for e in val])}}}"
+                else:
+                    return f"{{{','.join([str(e) for e in val])}}}"
+            else:
+                return val
+
+
         if isinstance( data, list ) and isinstance( data[0], dict ):
             columns = data[0].keys()
             # Alas, psycopg's copy seems to index the thing it's passed,
             #   so we can't just pass it d.values()
-            values = [ list( d.values() ) for d in data ]
+            values = [ [ arrayify(val) for val in d.values() ] for d in data ]
         elif isinstance( data, dict ):
             columns = list( data.keys() )
-            values = [ [ data[c][i] for c in columns ] for i in range(len(data[columns[0]])) ]
+            values = [ [ arrayify(data[c][i]) for c in columns ] for i in range(len(data[columns[0]])) ]
         elif isinstance( data, list ) and isinstance( data[0], cls ):
             # This isn't entirely satisfying.  But, we're going
             #   to assume that things that are None because they
@@ -990,7 +1002,7 @@ class DBBase:
             data = [ d._build_subdict( columns=columns, dbcon=dbcon ) for d in data ]
             # Alas, psycopg's copy seems to index the thing it's passed,
             #   so we can't just pass it d.values()
-            values = [ list( d.values() ) for d in data ]
+            values = [ [ arrayify(val) for val in d.values() ] for d in data ]
         else:
             raise TypeError( f"data must be something other than a {cls.__name__}" )
 
