@@ -3,12 +3,10 @@
 # attached to it.
 
 import os
-import sys
 import collections
 import types
 import uuid
 import time
-import logging
 from contextlib import contextmanager
 
 import numpy as np
@@ -35,7 +33,7 @@ _alwaysexplain = False
 # is, assuming you've already decided it's safe to drop all your tables,
 # make sure that there are no dependencies that will stop one of the
 # tables on the list from being dropped.
-all_table_names = [ 
+all_table_names = [
                    ]
 
 
@@ -166,7 +164,7 @@ class DBCon:
 
         """
         global _echoqueries, _alwaysexplain
-        
+
         if con is not None:
             self.con_is_mine = False
             if isinstance( con, DBCon ):
@@ -1087,5 +1085,3 @@ class Static_SGA( DBBase ):
     __tableschema__ = "static"
     _tablemeta = None
     _pk = [ 'sga_id' ]
-
-

@@ -69,5 +69,3 @@ class HealpixTSNR2( DBBase ):
     __tableschema__ = "loa"
     _tablemeta = None
     _pk = [ 'healpix_id', 'targetid' ]
-
-    

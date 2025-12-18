@@ -34,4 +34,3 @@ class TilesTSNR2( DBBase ):
     __tableschema__ = "daily"
     _tablemeta = None
     _pk = [ 'cumultile_id', 'targetid' ]
-

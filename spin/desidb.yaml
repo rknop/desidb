@@ -31,7 +31,7 @@ spec:
           value: /secrets/pgpasswd
         - name: POSTGRES_USER
           value: postgres
-        image: registry.nersc.gov/desi/rknop/desidb-django:20251216
+        image: registry.nersc.gov/desi/rknop/desidb-shell:20251218
         imagePullPolicy: Always
         name: desidb
         resources: {}
@@ -53,8 +53,8 @@ spec:
         # Uncomment this next one to not actually run apache
         command: [ "tail", "-f", "/etc/issue" ]
         volumeMounts:
-        - mountPath: /django
-          name: django-webap
+        - mountPath: /desidb
+          name: desidb-code
         - mountPath: /secrets
           name: desidb-secrets
         - mountPath: /data
@@ -63,9 +63,6 @@ spec:
         - mountPath: /targets
           name: desi-targets
           readOnly: true
-#         - mountPath: /dr1
-#           name: desi-dr1
-#           readOnly: true
       dnsConfig: {}
       dnsPolicy: ClusterFirst
       restartPolicy: Always
@@ -77,9 +74,9 @@ spec:
       terminationGracePeriodSeconds: 30
       volumes:
       - hostPath:
-          path: /global/cfs/cdirs/desi/users/raknop/desidb/django
+          path: /global/cfs/cdirs/desi/users/raknop/desidb
           type: Directory
-        name: django-webap
+        name: desidb-code
       - name: desidb-secrets
         secret:
           defaultMode: 256
@@ -93,10 +90,6 @@ spec:
           path: /global/cfs/cdirs/desi/target
           type: Directory
         name: desi-targets
-#       - hostPath:
-#           path: /global/cfs/cdirs/desi/public/dr1/spectro/redux
-#           type: Directory
-#         name: desi-dr1
 ---
 apiVersion: v1
 kind: Service
@@ -120,39 +113,3 @@ spec:
   sessionAffinity: None
   type: ClusterIP
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: desidb-ingress
-  namespace: desidb
-  ownerReferences:
-spec:
-  ports:
-  - port: 8080
-    protocol: TCP
-    targetPort: 8080
-  selector:
-    workload.user.cattle.io/workloadselector: deployment-desidb-desidb
-  sessionAffinity: None
-  type: ClusterIP
-status:
-  loadBalancer: {}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: desidb
-  namespace: desidb
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 500m
-spec:
-  rules:
-  - host: desidb.desidb.production.svc.spin.nersc.org
-    http:
-      paths:
-      - backend:
-          service:
-            name: desidb-ingress
-            port:
-              number: 8080
-        pathType: ImplementationSpecific
