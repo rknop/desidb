@@ -43,22 +43,22 @@ class Healpix( DBBase ):
     _pk = [ 'id' ]
 
 
-class HealPixRedshifts( DBBase ):
+class HealpixRedshifts( DBBase ):
     __tablename__ = "healpix_redshifts"
     __tableschema__ = "loa"
     _tablemeta = None
     _pk = [ 'healpix_id', 'targetid' ]
 
 
-class HealPixFibermap( DBBase ):
+class HealpixFibermap( DBBase ):
     __tablename__ = "healpix_fibermap"
     __tableschema__ = "loa"
     _tablemeta = None
     _pk = [ 'healpix_id', 'targetid' ]
 
 
-class HealPixExpFibermap( DBBase ):
-    __tablename__ = "heapix_expfibermap"
+class HealpixExpFibermap( DBBase ):
+    __tablename__ = "healpix_expfibermap"
     __tableschema__ = "loa"
     _tablemeta = None
     _pk = [ 'healpix_id', 'targetid', 'night', 'expid' ]

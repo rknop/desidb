@@ -198,16 +198,24 @@ class RRVersion:
         hdumap = {
             'HealpixRedshifts': { 'hdu': 'REDSHIFTS',
                                   'skipcheck': None,
-                                  'duplicates': 'error' },
+                                  'duplicates': 'error',
+                                  'customfields': [ 'healpix_id' ],
+                                 },
             'HealpixFibermap': { 'hdu': 'FIBERMAP',
                                  'skipcheck': None,
-                                 'duplicates': 'error' },
+                                 'duplicates': 'error',
+                                 'customfields': [ 'healpix_id' ],
+                                },
             'HealpixExpFibermap': { 'hdu': 'EXP_FIBERMAP',
                                     'skipcheck': None,
-                                    'duplicates': 'skip' },
+                                    'duplicates': 'skip',
+                                    'customfields': [ 'healpix_id' ],
+                                   },
             'HealpixTSNR2': { 'hdu': 'TSNR2',
                               'skipcheck': None,
-                              'duplicates': 'error' }
+                              'duplicates': 'error',
+                              'customfields': [ 'healpix_id' ],
+                             }
         }
         for key, val in hdumap.items():
             val['ignore'] = set()
@@ -695,7 +703,7 @@ class DESILoader:
                 except SchemaMismatchError as e:
                     loginfo = [ f"Schemamismatch error for surve {survey}, "
                                 f"program {program}, healpix {healpix.name}" ]
-                    self._print_schema_mismatch( e.data, loginfo, subject="DesiDB Schema Mismatch" )
+                    self.print_schema_mismatch( e.data, loginfo, subject="DesiDB Schema Mismatch" )
                     raise e
                 except FileNotFoundError:
                     DBLogger.error( f"Healpix FITS redrock file for survey={survey}, program={program}, "
@@ -706,7 +714,7 @@ class DESILoader:
                                       f"healpix={healpix.name}.  Skipping." )
                     continue
                 DBLogger.info( f"Imported healpix {healpix.name}, survey {survey}, program {program}" )
-                DBLogger.debug( "\n".join( self._build_schema_mismatch_info( data ) ) )
+                DBLogger.debug( "\n".join( self.build_schema_mismatch_info( data ) ) )
         DBLogger.info( f"Imported healpix//100 directory {str(direc)}" )
 
     # =====================================================================
@@ -729,7 +737,7 @@ class DESILoader:
         direc = self.basehealpixdir / survey
         if not direc.is_dir():
             raise FileNotFoundError( "Healpix survey directory {str(direc)} isn't a direcgtory" )
-        for programdir in direc.itercir():
+        for programdir in direc.iterdir():
             if programdir.is_dir():
                 self.load_healpix_survey_program( survey, programdir.name )
 
@@ -803,6 +811,8 @@ def main():
             else:
                 loader.load_healpix_survey_program( args.survey, args.program )
         else:
+            if args.healpixd100 is not None:
+                raise ValueError( "--healpixd100 requires --program" )
             loader.load_healpix_survey( args.survey )
 
 
