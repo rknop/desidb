@@ -62,6 +62,9 @@ spec:
         - mountPath: /data
           name: desi-data
           readOnly: true
+        - mountPath: /desicollab
+          name: desi-collab
+          readOnly: true
         - mountPath: /targets
           name: desi-targets
           readOnly: true
@@ -88,6 +91,10 @@ spec:
           path: /global/cfs/cdirs/desi
           type: Directory
         name: desi-data
+      - hostPath:
+          path: /global/cfs/cdirs/desicollab
+          type: Directory
+        name: desi-collab
       - hostPath:
           path: /global/cfs/cdirs/desi/target
           type: Directory

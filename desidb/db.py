@@ -918,7 +918,7 @@ class DBBase:
                     self.refresh( con )
 
     @classmethod
-    def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False,
+    def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False, die_on_conflict=False,
                                dbcon=None, nocommit=False ):
         """Try to efficiently insert a bunch of data into the database.
 
@@ -946,6 +946,18 @@ class DBBase:
              doing-- this happens in load_snana_fits.py, for instance)
              where the conflict clauses cause the sql to fail.  Set this
              to True to avoid having those clauses.
+
+             If True, then upsert must be false.
+
+          die_on_conflict: bool, default False
+             This is actually a synonym for assume_no_conflict; use of
+             either one will cause the same behavior.  It's here to
+             avoid violating the principle of least surprise.  If
+             there's a conflict (i.e. if you're inserting something
+             that's already there), then the operation will fail (an
+             exception will be raised by psycopg).
+
+             If True, then upsert must be false.
 
           nocommit : bool, default False
              This one is very scary and you should only use it if you
@@ -1013,13 +1025,15 @@ class DBBase:
                 for v in values:
                     copier.write_row( v )
 
-            if not assume_no_conflict:
+            if not ( assume_no_conflict or die_on_conflict ):
                 if not upsert:
                     conflict = f"ON CONFLICT ({','.join(cls._pk)}) DO NOTHING"
                 else:
                     conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
                                  + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
             else:
+                if upsert:
+                    raise ValueError( "Can't use upsert with assume_no_conflict or die_on_conflict" )
                 conflict = ""
 
             q = f"INSERT INTO {cls.__tableschema__}.{cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
