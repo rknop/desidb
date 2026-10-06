@@ -15,10 +15,10 @@ def find_observed_targets( ras, decs, match_radius=1., release="daily", passwd=N
 
     Parameters
     ----------
-      ra : sequence of float (e.g. list of float, or numpy array of float)
+      ras : sequence of float (e.g. list of float, or numpy array of float)
         RAs of the coordinates
 
-      dec : sequence of float
+      decs : sequence of float
         Decs of the coordinates
 
       match_radius : float, default 1.0
@@ -33,13 +33,32 @@ def find_observed_targets( ras, decs, match_radius=1., release="daily", passwd=N
        found, observations
 
          found is an array of boolean, whether any observations were found
-         observations is a pandas dataframe indexed by 
+         observations is a pandas dataframe with columns:
+            index : index into your ras and decs lists
+            ra : from your list
+            dec : from your list
+            targetid : desi targetid
+            petal_loc
+            device_loc
+            coadd_numnight
+            mean_fiber_ra
+            mean_fiber_dec
+
+         The same index may show up more than once, if DESI has listed
+         more than one target.  (This will happen if the target was in
+         SV3 and main, for instance.)
+
+         If there was no match, then many of the following columns will
+         be None or <NA> or something like that.
+
+         Ignore the columns "firstnight" and "lastnight", they aren't
+         actually populated.
 
     """
 
     if passwd is None:
         raise ValueError( "Must pass desi password" )
-    
+
     if ( ( not isinstance( ras, collections.abc.Sequence ) ) or
          ( not isinstance( decs, collections.abc.Sequence ) ) or
          ( len(ras) != len(decs) )
@@ -48,7 +67,7 @@ def find_observed_targets( ras, decs, match_radius=1., release="daily", passwd=N
 
     con = psycopg.connect( dbname="desidb", user="desi", password=passwd, host="desidb-rr.lbl.gov" )
     cursor = con.cursor()
-    
+
     cursor.execute( "CREATE TEMP TABLE temp_ra_dec(dex int, ra double precision, dec double precision)" )
     with cursor.copy( "COPY temp_ra_dec(dex,ra,dec) FROM stdin" ) as copier:
         for i, (ra, dec) in enumerate( zip( ras, decs ) ):
@@ -76,7 +95,7 @@ def find_observed_targets( ras, decs, match_radius=1., release="daily", passwd=N
     foundindexes = df[ ~df.mean_fiber_ra.isna() ]['index'].unique()
     found = np.full( (len(ras),), False )
     found[ foundindexes ] = True
-                     
+
     return found, df
 
 
@@ -90,7 +109,7 @@ def main():
     found, observations = find_observed_targets( ras, decs, passwd=sys.argv[1] )
     import pdb; pdb.set_trace()
     pass
-    
+
 
 if __name__ == "__main__":
     main()
